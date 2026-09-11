@@ -20,6 +20,8 @@ rem and the only way to pick up frontend edits (UI is embedded into the exe).
 
 :build
 echo [holdem] Building the solver ^(incremental; first run takes minutes^)...
+taskkill /f /im holdem-solver-server.exe >nul 2>nul
+timeout /t 1 /nobreak >nul
 cargo +1.75.0 build --release -p holdem-solver-server
 if errorlevel 1 (
     echo [holdem] Build failed. See the compiler output above.
