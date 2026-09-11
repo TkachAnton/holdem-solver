@@ -26,10 +26,11 @@
       --amber-soft: rgba(213, 179, 107, .14);
       --red: #e97878;
       --red-soft: rgba(233, 120, 120, .14);
-      --fold: #3f7eb2;
-      --call: #747474;
-      --raise: #ef4347;
-      --allin: #8c2025;
+      --fold: #3b6fd4;
+      --call: #2f9e63;
+      --check: #d9a83c;
+      --raise: #d64545;
+      --push: #8f5bd0;
       --shadow: none;
       --radius: 5px;
       --radius-small: 3px;
@@ -290,9 +291,10 @@
     .legend-swatch { display: inline-block; width: 10px; height: 10px; border: 1px solid rgba(255,255,255,.18); }
     .legend-swatch.fold, .dominant-fold { background: var(--fold); }
     .legend-swatch.call, .dominant-call { background: var(--call); }
+    .legend-swatch.check, .dominant-check { background: var(--check); }
     .legend-swatch.covered { background: #666; }.legend-swatch.partial { background: #4b4b4b; }.legend-swatch.empty { background: #292929; }
     .legend-swatch.raise, .dominant-raise { background: var(--raise); }
-    .legend-swatch.allin, .dominant-allin { background: var(--allin); }
+    .legend-swatch.push, .dominant-push { background: var(--push); }
     .matrix-wrap { overflow: auto; padding-bottom: 2px; }
     .matrix-axis.top { display: grid; grid-template-columns: repeat(13, minmax(45px, 1fr)); margin-left: 35px; min-width: 620px; }
     .matrix-row { display: flex; min-width: 655px; }
@@ -300,17 +302,18 @@
     .matrix-axis div { display: grid; place-items: center; color: #a9a9a9; font-size: 12px; font-weight: 750; }
     .hand-matrix { display: grid; grid-template-columns: repeat(13, minmax(45px, 1fr)); grid-template-rows: repeat(13, minmax(45px, 1fr)); min-width: 620px; border-top: 1px solid #191919; border-left: 1px solid #191919; }
     .hand-cell { position: relative; display: flex; flex-direction: column; justify-content: space-between; min-height: 45px; padding: 5px 6px 4px; color: #f3f3f3; border-right: 1px solid #191919; border-bottom: 1px solid #191919; background: #303030; }
-    .hand-cell.dominant-fold { background: #3f7eb2; }
-    .hand-cell.dominant-call { background: #666; }
-    .hand-cell.dominant-raise { background: #d93e42; }
-    .hand-cell.dominant-allin { background: #812126; }
+    .hand-cell.dominant-fold { background: var(--fold); }
+    .hand-cell.dominant-call { background: var(--call); }
+    .hand-cell.dominant-check { background: var(--check); color: #242424; }
+    .hand-cell.dominant-raise { background: var(--raise); }
+    .hand-cell.dominant-push { background: var(--push); }
     .hand-cell.unseen { color: #858585; background: #2b2b2b; }
     .hand-cell.hero-class { outline: 2px solid #f0f0f0; outline-offset: -2px; z-index: 1; }
     .cell-name { font-size: 12px; font-weight: 750; line-height: 1; }
     .cell-frequency { align-self: end; font-size: 11px; font-variant-numeric: tabular-nums; }
     .cell-bar { display: flex; height: 3px; margin: 2px -1px 0; overflow: hidden; background: rgba(0,0,0,.18); }
     .cell-bar i { display: block; height: 100%; }
-    .cell-bar .fold { background: #8cb9dd; }.cell-bar .call { background: #bcbcbc; }.cell-bar .raise { background: #ffb0b0; }.cell-bar .allin { background: #e98b8e; }
+    .cell-bar .fold { background: #7ba4e8; }.cell-bar .call { background: #74c996; }.cell-bar .check { background: #ecc170; }.cell-bar .raise { background: #ef8a8a; }.cell-bar .push { background: #b189e0; }
     .matrix-foot { display: flex; justify-content: space-between; gap: 12px; padding-top: 10px; color: #888; font-size: 11px; }
     .analysis-rail { display: grid; align-content: start; background: #1c1c1c; }
     .rail-block { padding: 14px; border-bottom: 1px solid #383838; }
@@ -326,9 +329,9 @@
     .dealer-marker { position: absolute; top: 50%; right: 21%; color: #e8e8e8; font-size: 11px; font-weight: 800; }
     .action-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px; }
     .action-card { min-height: 94px; padding: 8px; color: #fff; }
-    .action-card.fold { background: var(--fold); }.action-card.call { background: var(--call); }.action-card.raise { background: var(--raise); }.action-card.allin { background: var(--allin); }
+    .action-card.fold { background: var(--fold); }.action-card.call { background: var(--call); }.action-card.check { background: var(--check); color: #242424; }.action-card.raise { background: var(--raise); }.action-card.push { background: var(--push); }
     .action-card .card-name { font-size: 13px; font-weight: 750; }.action-card .card-value { margin-top: 14px; font-size: 22px; font-weight: 800; line-height: 1; }.action-card .card-meta { margin-top: 5px; color: rgba(255,255,255,.75); font-size: 10px; }
-    .action-stack { display: flex; height: 12px; margin-top: 8px; background: #303030; border: 1px solid #454545; }.action-stack i { display: block; height: 100%; }.action-stack .fold { background: var(--fold); }.action-stack .call { background: var(--call); }.action-stack .raise { background: var(--raise); }.action-stack .allin { background: var(--allin); }
+    .action-stack { display: flex; height: 12px; margin-top: 8px; background: #303030; border: 1px solid #454545; }.action-stack i { display: block; height: 100%; }.action-stack .fold { background: var(--fold); }.action-stack .call { background: var(--call); }.action-stack .check { background: var(--check); }.action-stack .raise { background: var(--raise); }.action-stack .push { background: var(--push); }
     .compact-meta { display: grid; gap: 8px; color: #999; font-size: 12px; }.compact-meta div { display: flex; justify-content: space-between; gap: 12px; }.compact-meta strong { color: #e5e5e5; font-weight: 650; }
     .analysis-workspace .pill { background: #303030; }.analysis-workspace .pill.completed { color: #d3f5c2; background: #33462d; border-color: #5b8251; }
     .analysis-progress { max-width: 190px; color: #8d8d8d; font-size: 11px; text-align: right; }
@@ -361,7 +364,7 @@
     .combo-cards { color: #f0f0f0; font: 12px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 750; }
     .combo-visits { color: #8f8f8f; font-size: 10px; }
     .combo-dominant { justify-self: end; padding: 2px 5px; color: #fff; font-size: 10px; font-weight: 750; }
-    .combo-dominant.fold { background: var(--fold); }.combo-dominant.call { background: var(--call); }.combo-dominant.raise { background: var(--raise); }.combo-dominant.allin { background: var(--allin); }.combo-dominant.none { color: #777; background: #333; }
+    .combo-dominant.fold { background: var(--fold); }.combo-dominant.call { background: var(--call); }.combo-dominant.check { background: var(--check); color: #242424; }.combo-dominant.raise { background: var(--raise); }.combo-dominant.push { background: var(--push); }.combo-dominant.none { color: #777; background: #333; }
     .combo-actions { grid-column: 1 / -1; color: #9b9b9b; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .blocker-summary { margin-top: 10px; padding-top: 9px; color: #a6a6a6; border-top: 1px solid #383838; font-size: 11px; line-height: 1.45; }
     .blocker-summary strong { color: #e2e2e2; }
@@ -448,9 +451,9 @@
       <section id="analysisWorkspace" class="analysis-workspace" aria-label="Solver analysis">
         <div class="analysis-head">
           <div class="analysis-context">
-            <div class="analysis-kicker">Strategy + frequencies</div>
+            <div class="analysis-kicker">Стратегия hero · матрица частот</div>
             <h2 id="analysisTitle">Hero strategy</h2>
-            <p id="analysisSubtitle">Exact combo coverage will appear after the solve.</p>
+            <p id="analysisSubtitle">Матрица и частоты появятся сразу после завершения solve.</p>
           </div>
           <div class="analysis-tools">
             <span id="analysisStatus" class="pill">No result</span>
@@ -463,16 +466,16 @@
         <div class="analysis-grid">
           <section class="matrix-panel">
             <div class="analysis-tabs" role="tablist" aria-label="Analysis views"><button class="analysis-tab active" type="button" data-analysis-tab="strategy" role="tab" aria-selected="true">Стратегия</button><button class="analysis-tab" type="button" data-analysis-tab="range" role="tab" aria-selected="false">Диапазон</button><button class="analysis-tab" type="button" data-analysis-tab="diagnostics" role="tab" aria-selected="false">Диагностика</button></div>
-            <div class="matrix-toolbar"><div><strong>Hero combo matrix</strong><span id="matrixCaption">—</span></div><div id="matrixLegend" class="matrix-legend"><span><i class="legend-swatch fold"></i>Fold</span><span><i class="legend-swatch call"></i>Call</span><span><i class="legend-swatch raise"></i>Raise</span><span><i class="legend-swatch allin"></i>All-in</span></div></div>
+            <div class="matrix-toolbar"><div><strong>13×13 стратегия hero</strong><span id="matrixCaption">—</span></div><div id="matrixLegend" class="matrix-legend"><span><i class="legend-swatch raise"></i>Raise</span><span><i class="legend-swatch call"></i>Call</span><span><i class="legend-swatch fold"></i>Fold</span><span><i class="legend-swatch check"></i>Check</span><span><i class="legend-swatch push"></i>Push</span></div></div>
             <div class="matrix-wrap"><div class="matrix-axis top" id="matrixColumns"></div><div class="matrix-row"><div class="matrix-axis side" id="matrixRows"></div><div id="handMatrix" class="hand-matrix"></div></div></div>
-            <div class="matrix-foot"><span id="matrixFootnote">Цвет обозначает действие; число — частоту. Пустые ячейки не были запрошены в этом spot.</span><span id="matrixCoverage">—</span></div>
+            <div class="matrix-foot"><span id="matrixFootnote">Цвет — доминирующее действие, число — его частота, полоска — весь микс. Серые ячейки solver не посещал.</span><span id="matrixCoverage">—</span></div>
           </section>
           <aside class="analysis-rail">
             <section class="rail-block table-block"><div class="rail-heading"><span>Table</span><span id="railStreet">preflop</span></div><div id="tableDiagram" class="table-diagram"></div></section>
-            <section class="rail-block"><div class="rail-heading"><span>Actions</span><span id="actionTotal">—</span></div><div id="actionCards" class="action-cards"></div><div id="actionStack" class="action-stack"></div><div id="actionEvNote" class="ev-missing">Per-action EV не экспортирован; positive regret не является EV.</div></section>
+            <section class="rail-block"><div class="rail-heading"><span>Actions</span><span id="actionTotal">—</span></div><div id="actionCards" class="action-cards"></div><div id="actionStack" class="action-stack"></div><div id="actionEvNote" class="ev-missing">EV по действиям в этом результате не отдаётся; positive regret — это не EV.</div></section>
             <section class="rail-block compact-meta"><div><span>Tree nodes</span><strong id="analysisTreeNodes">—</strong></div><div><span>Iterations</span><strong id="analysisIterations">—</strong></div><div><span>Observed weight</span><strong id="analysisObservedWeight">—</strong></div><div><span>Missing combos</span><strong id="analysisMissingHands">—</strong></div></section>
-            <section class="rail-block inspector-block"><div class="rail-heading"><span>Combo inspector</span><button id="clearSelectionButton" class="rail-link" type="button">Сбросить</button></div><div id="selectionSummary" class="selection-summary">Выберите ячейку matrix, чтобы увидеть exact combos и blockers.</div><div id="comboList" class="combo-list"></div><div id="blockerSummary" class="blocker-summary"></div></section>
-            <section id="convergenceBlock" class="rail-block convergence-block"><div class="rail-heading"><span>Convergence</span><span id="convergenceLabel">после solve</span></div><div id="convergenceContent" class="convergence-content"><div class="analysis-empty">Diagnostics появятся в result JSON. Positive regret — диагностический сигнал, не exploitability proof.</div></div></section>
+            <section class="rail-block inspector-block"><div class="rail-heading"><span>Combo inspector</span><button id="clearSelectionButton" class="rail-link" type="button">Сбросить</button></div><div id="selectionSummary" class="selection-summary">Клик по ячейке matrix — точные combo и blockers класса.</div><div id="comboList" class="combo-list"></div><div id="blockerSummary" class="blocker-summary"></div></section>
+            <section id="convergenceBlock" class="rail-block convergence-block"><div class="rail-heading"><span>Convergence</span><span id="convergenceLabel">после solve</span></div><div id="convergenceContent" class="convergence-content"><div class="analysis-empty">Диагностика сходимости появится после solve. Positive regret — сигнал сходимости, не доказательство exploitability.</div></div></section>
           </aside>
         </div>
       </section>
@@ -605,7 +608,7 @@
 
           <section id="answerPanel" class="panel answer-panel">
             <div class="answer-header"><h2>Hero answer</h2><span id="answerSubhead">Пока нет результата</span></div>
-            <div id="answerEmpty" class="answer-empty">После завершения solve здесь будут action frequencies по hero hand. Это не «магическое решение», а оценка на текущем числе iterations и sampling coverage.</div>
+            <div id="answerEmpty" class="answer-empty">После solve здесь будут частоты действий hero hand. Это оценка на текущих iterations и coverage, а не «универсальный ответ».</div>
             <div id="answerContent" class="hidden"><div id="actionList" class="action-list"></div><div id="coverageLine" class="panel-note" style="margin-top:20px"></div><details class="raw-result"><summary>Показать raw JSON result</summary><pre id="rawResult"></pre></details></div>
           </section>
         </aside>
@@ -644,9 +647,25 @@
         });
       }
       function text(id) { return $(id).value.trim(); }
+      const positionNamesBySize = {
+        2: ['BTN/SB', 'BB'],
+        3: ['BTN', 'SB', 'BB'],
+        4: ['BTN', 'SB', 'BB', 'CO'],
+        5: ['BTN', 'SB', 'BB', 'UTG', 'CO'],
+        6: ['BTN', 'SB', 'BB', 'UTG', 'HJ', 'CO'],
+        7: ['BTN', 'SB', 'BB', 'UTG', 'UTG+1', 'HJ', 'CO'],
+        8: ['BTN', 'SB', 'BB', 'UTG', 'UTG+1', 'LJ', 'HJ', 'CO']
+      };
+      function seatPosition(seat) {
+        const size = number('tableSize', 8); const button = number('buttonSeat', 0);
+        const names = positionNamesBySize[size] || positionNamesBySize[8];
+        const offset = (((Number(seat) - button) % size) + size) % size;
+        return names[offset] || `S${seat}`;
+      }
+      function seatLabel(seat) { return `Seat ${seat} · ${seatPosition(seat)}`; }
       function seatOptions(selected) {
         const size = number('tableSize', 8);
-        return Array.from({ length: size }, (_, index) => `<option value="${index}" ${index === selected ? 'selected' : ''}>Seat ${index}</option>`).join('');
+        return Array.from({ length: size }, (_, index) => `<option value="${index}" ${index === selected ? 'selected' : ''}>${seatLabel(index)}</option>`).join('');
       }
       function actionOptions(selected) {
         return ['fold', 'check', 'call', 'bet', 'raise', 'all_in'].map((kind) => `<option value="${kind}" ${kind === selected ? 'selected' : ''}>${actionLabel(kind)}</option>`).join('');
@@ -694,7 +713,7 @@
           const value = old[index] || defaultRanges[index] || 'AA-TT, AKs-ATs, KQs-KTs, QJs';
           const row = document.createElement('div');
           row.className = 'range-row';
-          row.innerHTML = `<div class="range-seat">Seat ${index}${index === hero ? '<span>hero</span>' : ''}</div><input class="range-input" data-seat="${index}" value="${escapeAttribute(value)}" spellcheck="false" aria-label="Range seat ${index}">`;
+          row.innerHTML = `<div class="range-seat">Seat ${index} · ${seatPosition(index)}${index === hero ? '<span>hero</span>' : ''}</div><input class="range-input" data-seat="${index}" value="${escapeAttribute(value)}" spellcheck="false" aria-label="Range seat ${index}">`;
           $('rangeRows').appendChild(row);
         }
       }
@@ -814,7 +833,7 @@
         $('statusPill').className = `pill ${mode}`;
       }
       function renderMetrics(data) {
-        const values = [data.tree_nodes ?? '—', data.hero_hands ?? '—', data.actor_after_history === null ? '—' : `Seat ${data.actor_after_history ?? '—'}`, data.tree_fingerprint ?? '—'];
+        const values = [data.tree_nodes ?? '—', data.hero_hands ?? '—', data.actor_after_history === null || data.actor_after_history === undefined ? '—' : seatLabel(data.actor_after_history), data.tree_fingerprint ?? '—'];
         const labels = ['Tree nodes', 'Hero combos', 'Actor after history', 'Tree fingerprint'];
         $('metrics').innerHTML = values.map((value, index) => `<div class="metric"><div class="metric-label">${labels[index]}</div><div class="metric-value">${value}</div></div>`).join('');
       }
@@ -870,9 +889,9 @@
       function dominantAction(actions) {
         if (!actions?.length) return 'unseen';
         const item = [...actions].sort((left, right) => Number(right.frequency || 0) - Number(left.frequency || 0))[0];
-        return ({ fold: 'dominant-fold', check: 'dominant-call', call: 'dominant-call', bet: 'dominant-raise', raise: 'dominant-raise', all_in: 'dominant-allin' })[item.action?.kind] || 'unseen';
+        return ({ fold: 'dominant-fold', check: 'dominant-check', call: 'dominant-call', bet: 'dominant-raise', raise: 'dominant-raise', all_in: 'dominant-push' })[item.action?.kind] || 'unseen';
       }
-      function actionKindClass(kind) { return kind === 'all_in' ? 'allin' : ((kind === 'bet' || kind === 'raise') ? 'raise' : (kind === 'check' ? 'call' : kind)); }
+      function actionKindClass(kind) { return kind === 'all_in' ? 'push' : ((kind === 'bet' || kind === 'raise') ? 'raise' : kind); }
       function escapeHtml(value) { return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
       function actionBar(actions) {
         return (actions || []).map((item) => `<i class="${actionKindClass(item.action?.kind)}" style="width:${Math.max(0, Math.min(100, Number(item.frequency || 0) * 100))}%"></i>`).join('');
@@ -966,7 +985,7 @@
       }
       function renderSelectionInspector(className) {
         if (!className || !state.currentResult) {
-          $('selectionSummary').innerHTML = 'Выберите ячейку matrix после solve, чтобы увидеть exact combos и blockers.';
+          $('selectionSummary').innerHTML = 'Клик по ячейке matrix — точные combo и blockers класса.';
           $('comboList').innerHTML = '';
           $('blockerSummary').innerHTML = '';
           return;
@@ -981,26 +1000,26 @@
           const actionSummary = actions.length ? actions.map((item) => `${actionText(item)} ${(Number(item.frequency || 0) * 100).toFixed(0)}%`).join(' · ') : 'not observed';
           return `<div class="combo-row"><span class="combo-cards">${formatCards(cards)}</span><span class="combo-visits">${info ? `${Number(info.visits || 0).toLocaleString('ru-RU')} visits` : 'not visited'}</span><span class="combo-dominant ${kind}">${dominant ? `${actionLabel(dominant.action?.kind)} ${(Number(dominant.frequency || 0) * 100).toFixed(0)}%` : '—'}</span><span class="combo-actions">${actionSummary}</span></div>`;
         }).join('');
-        $('selectionSummary').innerHTML = `<strong>${escapeHtml(className)}</strong> · ${infosets.length || observed.length}/${combos.length} exact combos observed · ${selectedClassActions(result, className) ? 'strategy available' : 'no strategy data'}`;
+        $('selectionSummary').innerHTML = `<strong>${escapeHtml(className)}</strong> · ${infosets.length || observed.length}/${combos.length} combo посещено · ${selectedClassActions(result, className) ? 'стратегия есть' : 'нет данных стратегии'}`;
         $('comboList').innerHTML = rows || '<div class="analysis-empty">Не удалось развернуть этот class.</div>';
         const blockedCards = [...new Set(blocked.flat())]; const blockedText = blocked.length ? `<span class="blocked">${blocked.length} blocked</span> by ${escapeHtml(formatCards(blockedCards))}` : '<span class="available">no known blockers</span>';
         const unobserved = Math.max(0, combos.length - new Set([...infoByCombo.keys()]).size);
-        $('blockerSummary').innerHTML = `Known blockers: ${blockedText}. Coverage leaves ${unobserved} combo${unobserved === 1 ? '' : 's'} unobserved; это может быть range exclusion или sampling coverage.`;
+        $('blockerSummary').innerHTML = `Blockers: ${blockedText}. Не посещено combo: ${unobserved} — либо исключены диапазоном, либо мало итераций.`;
       }
       function renderConvergence(result) {
         const report = result?.strategy_report || {}; const convergence = report.convergence || {}; const utility = report.utility_estimate || {}; const player = result?.hero?.player ?? 0; const playerReport = (convergence.players || []).find((entry) => entry.player === player) || {};
         const mean = utility.mean?.[player] ?? report.sampled_average_utility?.[player]; const standardError = utility.standard_error?.[player]; const bestResponse = result?.best_response?.players?.find((entry) => entry.player === player);
         $('convergenceLabel').textContent = convergence.iterations ? `${Number(convergence.iterations).toLocaleString('ru-RU')} iter` : 'diagnostic';
-        $('convergenceContent').innerHTML = `<div class="diagnostic-grid"><div class="diagnostic-metric"><span>Profile utility</span><strong>${formatNumber(mean, 3)}</strong></div><div class="diagnostic-metric"><span>Utility SE</span><strong>${formatNumber(standardError, 3)}</strong></div><div class="diagnostic-metric"><span>Avg positive regret</span><strong>${formatNumber(playerReport.average_positive_regret, 3)}</strong></div><div class="diagnostic-metric"><span>Strategy L1 drift</span><strong>${formatNumber(playerReport.strategy_l1_distance, 3)}</strong></div></div><div class="diagnostic-row"><div class="diagnostic-row-top"><span>Infosets / visits</span><span>${Number(playerReport.infosets || 0).toLocaleString('ru-RU')} / ${Number(playerReport.visits || 0).toLocaleString('ru-RU')}</span></div><div class="diagnostic-track"><i style="width:${Math.min(100, Math.max(0, Number(playerReport.infosets || 0) ? 100 : 0))}%"></i></div></div>${bestResponse ? `<div class="diagnostic-note">Best response improvement: ${formatNumber(bestResponse.improvement, 3)} ± ${formatNumber(bestResponse.improvement_standard_error, 3)}.</div>` : '<div class="diagnostic-note">Best-response probe не включён в этот result. Positive regret и L1 drift полезны для тренда, но не являются exploitability proof.</div>'}`;
+        $('convergenceContent').innerHTML = `<div class="diagnostic-grid"><div class="diagnostic-metric"><span>Profile utility</span><strong>${formatNumber(mean, 3)}</strong></div><div class="diagnostic-metric"><span>Utility SE</span><strong>${formatNumber(standardError, 3)}</strong></div><div class="diagnostic-metric"><span>Avg positive regret</span><strong>${formatNumber(playerReport.average_positive_regret, 3)}</strong></div><div class="diagnostic-metric"><span>Strategy L1 drift</span><strong>${formatNumber(playerReport.strategy_l1_distance, 3)}</strong></div></div><div class="diagnostic-row"><div class="diagnostic-row-top"><span>Infosets / visits</span><span>${Number(playerReport.infosets || 0).toLocaleString('ru-RU')} / ${Number(playerReport.visits || 0).toLocaleString('ru-RU')}</span></div><div class="diagnostic-track"><i style="width:${Math.min(100, Math.max(0, Number(playerReport.infosets || 0) ? 100 : 0))}%"></i></div></div>${bestResponse ? `<div class="diagnostic-note">Best response improvement: ${formatNumber(bestResponse.improvement, 3)} ± ${formatNumber(bestResponse.improvement_standard_error, 3)}.</div>` : '<div class="diagnostic-note">Best-response probe не включён в результат. Positive regret и L1 drift полезны как тренд, но это не proof exploitability.</div>'}`;
       }
       function setAnalysisTab(tab) {
         state.analysisTab = tab;
         document.querySelectorAll('[data-analysis-tab]').forEach((button) => { const active = button.dataset.analysisTab === tab; button.classList.toggle('active', active); button.setAttribute('aria-selected', active ? 'true' : 'false'); });
         const grid = document.querySelector('.analysis-grid'); if (grid) grid.classList.toggle('diagnostics-mode', tab === 'diagnostics');
-        $('matrixLegend').innerHTML = tab === 'range' ? '<span><i class="legend-swatch covered"></i>full</span><span><i class="legend-swatch partial"></i>partial</span><span><i class="legend-swatch empty"></i>unseen</span>' : '<span><i class="legend-swatch fold"></i>Fold</span><span><i class="legend-swatch call"></i>Call</span><span><i class="legend-swatch raise"></i>Raise</span><span><i class="legend-swatch allin"></i>All-in</span>';
+        $('matrixLegend').innerHTML = tab === 'range' ? '<span><i class="legend-swatch covered"></i>full</span><span><i class="legend-swatch partial"></i>partial</span><span><i class="legend-swatch empty"></i>unseen</span>' : '<span><i class="legend-swatch raise"></i>Raise</span><span><i class="legend-swatch call"></i>Call</span><span><i class="legend-swatch fold"></i>Fold</span><span><i class="legend-swatch check"></i>Check</span><span><i class="legend-swatch push"></i>Push</span>';
         if (state.currentResult) renderMatrix(state.currentResult);
-        if (tab === 'diagnostics') $('analysisSubtitle').textContent = state.currentResult ? 'Convergence diagnostics are shown beside the strategy; use them as trend signals, not exploitability proof.' : 'Diagnostics появятся после завершения solve.';
-        if (tab === 'range') $('analysisSubtitle').textContent = state.currentResult ? 'Matrix coverage shows which exact combos produced visited infosets; click a class for the exact list.' : 'Range coverage появится после solve.';
+        if (tab === 'diagnostics') $('analysisSubtitle').textContent = state.currentResult ? 'Диагностика сходимости — рядом со стратегией. Это сигналы тренда, а не доказательство exploitability.' : 'Диагностика появится после завершения solve.';
+        if (tab === 'range') $('analysisSubtitle').textContent = state.currentResult ? 'Покрытие matrix: какие combo посетил solver. Клик по классу — точный список.' : 'Покрытие диапазона появится после solve.';
       }
       function setSetupVisible(visible) {
         document.body.classList.toggle('setup-visible', visible);
@@ -1016,24 +1035,24 @@
         $('matrixColumns').innerHTML = matrixRanks.map((rank) => `<div>${rank}</div>`).join('');
         $('matrixRows').innerHTML = matrixRanks.map((rank) => `<div>${rank}</div>`).join('');
         $('handMatrix').innerHTML = matrixRanks.flatMap((_, row) => matrixRanks.map((_, column) => `<div class="hand-cell unseen" data-class="${matrixClass(row, column)}"><span class="cell-name">${matrixClass(row, column)}</span><span class="cell-frequency">—</span></div>`)).join('');
-        $('matrixCaption').textContent = 'awaiting solve'; $('matrixCoverage').textContent = 'no data';
-        $('actionTotal').textContent = '—'; $('actionCards').innerHTML = '<div class="analysis-empty">После solve здесь появятся action frequencies.</div>'; $('actionStack').innerHTML = '';
+        $('matrixCaption').textContent = 'ожидание solve'; $('matrixCoverage').textContent = 'нет данных';
+        $('actionTotal').textContent = '—'; $('actionCards').innerHTML = '<div class="analysis-empty">Частоты действий появятся после solve.</div>'; $('actionStack').innerHTML = '';
         $('analysisTreeNodes').textContent = '—'; $('analysisIterations').textContent = '—'; $('analysisObservedWeight').textContent = '—'; $('analysisMissingHands').textContent = '—';
-        $('convergenceLabel').textContent = 'после solve'; $('convergenceContent').innerHTML = '<div class="analysis-empty">Diagnostics появятся в result JSON. Positive regret — диагностический сигнал, не exploitability proof.</div>';
+        $('convergenceLabel').textContent = 'после solve'; $('convergenceContent').innerHTML = '<div class="analysis-empty">Диагностика сходимости появится после solve. Positive regret — сигнал сходимости, не доказательство exploitability.</div>';
         renderDecisionStrip(); renderTableDiagram(); renderSelectionInspector(null); setAnalysisTab('strategy');
       }
       function renderDecisionStrip() {
         const rows = [...document.querySelectorAll('.history-row')];
         const nodes = rows.map((row) => {
           const player = row.querySelector('.player-field').value; const kind = row.querySelector('.action-field').value; const target = row.querySelector('.target-input').value;
-          return `<div class="decision-node"><div class="node-player">Seat ${player}</div><div class="node-action">${actionLabel(kind, target && (kind === 'raise' || kind === 'bet') ? target : undefined)}</div><div class="node-detail">observed</div></div>`;
+          return `<div class="decision-node"><div class="node-player">${seatLabel(player)}</div><div class="node-action">${actionLabel(kind, target && (kind === 'raise' || kind === 'bet') ? target : undefined)}</div><div class="node-detail">observed</div></div>`;
         });
-        nodes.push(`<div class="decision-node current"><div class="node-player">Seat ${number('heroSeat', 1)} · hero</div><div class="node-action">Decision</div><div class="node-detail">continuation spot</div></div>`);
+        nodes.push(`<div class="decision-node current"><div class="node-player">${seatLabel(number('heroSeat', 1))} · hero</div><div class="node-action">Decision</div><div class="node-detail">continuation spot</div></div>`);
         $('decisionStrip').innerHTML = nodes.join('');
       }
       function renderTableDiagram() {
         const size = number('tableSize', 8); const hero = number('heroSeat', 1); const button = number('buttonSeat', 0);
-        const labels = Array.from({ length: size }, (_, index) => `<span class="seat-chip s${index}${index === hero ? ' hero' : ''}">S${index}${index === hero ? '<br>hero' : (index === button ? '<br>D' : '')}</span>`).join('');
+        const labels = Array.from({ length: size }, (_, index) => `<span class="seat-chip s${index}${index === hero ? ' hero' : ''}">S${index} · ${seatPosition(index)}${index === hero ? '<br>hero' : (index === button ? '<br>dealer' : '')}</span>`).join('');
         $('tableDiagram').innerHTML = `<div class="table-oval"></div><div class="table-centre">${text('smallBlind')} / ${text('bigBlind')}<br><span class="muted">ChipEV</span></div><div class="dealer-marker">D</div>${labels}`;
         $('railStreet').textContent = 'preflop';
       }
@@ -1041,7 +1060,7 @@
         state.selectedClass = className;
         document.querySelectorAll('.hand-cell').forEach((cell) => cell.classList.toggle('selected', cell.dataset.class === className));
         const list = actions || selectedClassActions(state.currentResult, className);
-        $('analysisSubtitle').textContent = list ? `${className}: ${list.map((item) => `${actionText(item)} ${(Number(item.frequency || 0) * 100).toFixed(1)}%`).join(' · ')}` : `${className}: в этом spot нет запрошенных combo data.`;
+        $('analysisSubtitle').textContent = list ? `${className}: ${list.map((item) => `${actionText(item)} ${(Number(item.frequency || 0) * 100).toFixed(1)}%`).join(' · ')}` : `${className}: данных по этому классу в spot нет.`;
         renderSelectionInspector(className);
         renderActionBreakdown(list || [], className);
       }
@@ -1059,7 +1078,7 @@
         })).join('');
         $('matrixCaption').textContent = state.analysisTab === 'range' ? `${hero.label || 'Hero'} · exact combo coverage` : `${hero.label || 'Hero'} · ${byClass.size} computed classes · ${hero.observed_hands?.length || 0}/${hero.requested_hands || 0} requested combos`;
         $('matrixCoverage').textContent = `observed ${(Number(hero.observed_weight || 0)).toFixed(2)} / requested ${(Number(hero.requested_weight || 0)).toFixed(2)}`;
-        $('matrixFootnote').textContent = state.analysisTab === 'range' ? 'Диапазонный вид: N/M — сколько exact combos класса посетил solver. Серый тон обозначает coverage, не действие.' : 'Цвет ячейки — доминирующее действие. Полоска внизу — распределение частот; пустые ячейки не вычислялись.';
+        $('matrixFootnote').textContent = state.analysisTab === 'range' ? 'Вид диапазона: N/M — сколько combo класса увидел solver. Серый — покрытие, не действие.' : 'Цвет — доминирующее действие, число — его частота, полоска — весь микс. Серые ячейки solver не посещал.';
         const selected = state.selectedClass || heroClass;
         if (selected) selectMatrixCell(selected, byClass.get(selected)); else { renderSelectionInspector(null); renderActionBreakdown(hero.actions || [], hero.label || 'Hero'); }
         document.querySelectorAll('.hand-cell').forEach((cell) => cell.addEventListener('click', () => selectMatrixCell(cell.dataset.class, byClass.get(cell.dataset.class))));
@@ -1192,9 +1211,10 @@
       $('historyRows').addEventListener('change', (event) => { const row = event.target.closest('.history-row'); if (row && event.target.classList.contains('action-field')) updateHistoryRow(row); renderDecisionStrip(); });
       $('historyRows').addEventListener('click', (event) => { if (event.target.classList.contains('remove-row')) { event.target.closest('.history-row').remove(); renumberHistory(); renderDecisionStrip(); } });
       $('addHistoryButton').addEventListener('click', () => { addHistoryRow(); renderDecisionStrip(); });
-      $('tableSize').addEventListener('change', () => { syncSeatControls(); renderRanges(); renderDecisionStrip(); renderTableDiagram(); });
+      ['tableSize'].forEach((id) => $(id).addEventListener('change', () => { syncSeatControls(); renderRanges(); renderDecisionStrip(); renderTableDiagram(); }));
       $('heroSeat').addEventListener('change', () => { renderRanges(); renderDecisionStrip(); renderTableDiagram(); });
-      ['buttonSeat', 'smallBlind', 'bigBlind', 'ante'].forEach((id) => $(id).addEventListener('input', renderTableDiagram));
+      $('buttonSeat').addEventListener('input', () => { syncSeatControls(); renderRanges(); renderDecisionStrip(); renderTableDiagram(); });
+      ['smallBlind', 'bigBlind', 'ante'].forEach((id) => $(id).addEventListener('input', renderTableDiagram));
       document.querySelectorAll('[data-analysis-tab]').forEach((button) => button.addEventListener('click', () => setAnalysisTab(button.dataset.analysisTab)));
       $('clearSelectionButton').addEventListener('click', () => { state.selectedClass = null; document.querySelectorAll('.hand-cell').forEach((cell) => cell.classList.remove('selected')); renderSelectionInspector(null); if (state.currentResult) renderActionBreakdown(state.currentResult.hero?.actions || [], 'Hero aggregate'); });
       $('presetSelect').addEventListener('change', (event) => applySelectedPreset(event.target.value));

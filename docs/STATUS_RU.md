@@ -246,6 +246,12 @@
 - Добавлены пользовательские документы:
   - `docs/EXECUTION_ARCHITECTURE_RU.md` — простое объяснение native/server/browser deployment model;
   - `docs/GETTING_STARTED_RU.md` — Windows setup, создание реального spot, pilot solve, resume, интерпретация и troubleshooting.
+- Добавлен GTO-подобный слой UI и запуск в один клик:
+  - action-цвета приведены к convention GTO Wizard: Raise красный, Call зелёный, Fold синий, Check жёлтый (отдельный цвет, не grey), Push фиолетовый; легенда matrix обновлена;
+  - `frontend/index.html` добавляет позиционные ярлыки UTG/UTG+1/LJ/HJ/CO/BTN/SB/BB в seat selects, history rows, range rows, table diagram, decision strip и validate metrics (offset от button, зеркалит `position_for_seat` из `holdem-domain`);
+  - copy UI очищен от случайного английско-русского смешения, тексты объяснения matrix/inspector/diagnostics переписаны коротко и по-русски;
+  - `start-solver.bat` (Windows): одна сборка при первом запуске, старт server, ожидание healthz, автопроткрытие браузера, `rebuild` флаг; `stop-solver.bat`; `scripts/start-solver.sh` для Linux;
+  - `docs/GETTING_STARTED_RU.md` получает раздел «0. Быстрый старт» с пошаговым «как увидеть матрицу».
 - Добавлен первый Hold'em adapter:
   - компиляция валидированного public-information `GameTree` в `StaticGame`;
   - сохранение action metadata рядом с solver child ids;
