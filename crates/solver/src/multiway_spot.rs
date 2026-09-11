@@ -9,7 +9,7 @@
 use holdem_cards::DeckMask;
 use holdem_domain::setup::build_preflop_state;
 use holdem_domain::table::TableConfig;
-use holdem_domain::{Action, GameState, PlayerId};
+use holdem_domain::{Action, GameState, PlayerId, PlayerStatus, Street, TerminalState};
 use holdem_ranges::{combos_for_hand, Combo, WeightedRange};
 use holdem_tree::{FullTreeBuildConfig, GameTree, LeafKind, TreeBuildConfig, TreeBuilder};
 use serde::Serialize;
@@ -78,11 +78,23 @@ pub struct MultiwayHoldemSpotHeroReport {
     pub actions: Vec<MultiwayBatchActionReport>,
 }
 
+/// Version of the result JSON format. The job format keeps
+/// `MULTIWAY_HOLDEM_SPOT_SCHEMA_VERSION`; results additionally carry
+/// `tree_index` from version 2 on, and readers must treat its absence as an
+/// older result.
+pub const MULTIWAY_HOLDEM_SPOT_RESULT_SCHEMA_VERSION: u32 = 2;
+
 #[derive(Debug, Clone)]
 pub struct MultiwayHoldemSpotResult {
     pub tree_fingerprint: u64,
     pub strategy_report: MultiwayBatchStrategyReport,
     pub hero: MultiwayHoldemSpotHeroReport,
+    /// One entry per compiled public-tree node, indexed by node id:
+    /// `{id, parent, street, board, pot, current_bet, dead_money, actor,
+    /// players[], actions[{action, child}], chance[{cards, child}],
+    /// terminal}`. Cards use the shared `rank * 4 + suit` encoding and
+    /// actions reuse the `ActionExport` shape of strategy reports.
+    pub tree_index: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -92,6 +104,7 @@ struct JsonMultiwayHoldemSpotResult {
     tree_fingerprint: u64,
     strategy_report: serde_json::Value,
     hero: JsonMultiwayHoldemSpotHeroReport,
+    tree_index: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -151,11 +164,12 @@ impl MultiwayHoldemSpotResult {
             actions: self.hero.actions.iter().map(json_spot_action).collect(),
         };
         serde_json::to_string_pretty(&JsonMultiwayHoldemSpotResult {
-            schema_version: crate::MULTIWAY_HOLDEM_SPOT_SCHEMA_VERSION,
+            schema_version: MULTIWAY_HOLDEM_SPOT_RESULT_SCHEMA_VERSION,
             format: "multiway_holdem_spot_result",
             tree_fingerprint: self.tree_fingerprint,
             strategy_report,
             hero,
+            tree_index: self.tree_index.clone(),
         })
         .map_err(|error| error.to_string())
     }
@@ -316,6 +330,7 @@ impl MultiwayHoldemSpotConfig {
             tree_fingerprint: multiway_holdem_tree_fingerprint(tree),
             strategy_report,
             hero,
+            tree_index: tree_index_json(tree),
         })
     }
 
@@ -331,6 +346,86 @@ impl MultiwayHoldemSpotConfig {
         solver.run_parallel(iterations, self.worker_count, self.reduction_batch_size)?;
         self.result_from_solver(&tree, &solver, utility_samples)
     }
+}
+
+fn tree_index_json(tree: &GameTree) -> Vec<serde_json::Value> {
+    tree.nodes
+        .iter()
+        .map(|node| {
+            let state = &node.state;
+            let street = match state.street {
+                Street::Preflop => "preflop",
+                Street::Flop => "flop",
+                Street::Turn => "turn",
+                Street::River => "river",
+            };
+            let actions = node
+                .children
+                .iter()
+                .filter_map(|&child| {
+                    tree.nodes
+                        .get(child)?
+                        .action_from_parent
+                        .as_ref()
+                        .map(|action| {
+                            serde_json::json!({
+                                "action": crate::ActionExport::from_action(action),
+                                "child": child,
+                            })
+                        })
+                })
+                .collect::<Vec<_>>();
+            let chance = node.chance.as_ref().map(|chance| {
+                chance
+                    .outcomes
+                    .iter()
+                    .zip(node.children.iter())
+                    .map(|(outcome, &child)| {
+                        serde_json::json!({ "cards": outcome.cards, "child": child })
+                    })
+                    .collect::<Vec<_>>()
+            });
+            let terminal = node.leaf.as_ref().map(|leaf| match leaf {
+                LeafKind::RoundComplete => serde_json::json!("round_complete"),
+                LeafKind::Terminal(TerminalState::Fold { winner }) => {
+                    serde_json::json!({ "kind": "fold", "winner": winner })
+                }
+                LeafKind::Terminal(TerminalState::Showdown) => {
+                    serde_json::json!({ "kind": "showdown" })
+                }
+            });
+            serde_json::json!({
+                "id": node.id,
+                "parent": node.parent,
+                "street": street,
+                "board": state.board,
+                "pot": state.pot,
+                "current_bet": state.current_bet,
+                "dead_money": state.dead_money,
+                "actor": state.actor,
+                "players": state
+                    .players
+                    .iter()
+                    .map(|player| {
+                        serde_json::json!({
+                            "seat": player.seat,
+                            "stack": player.stack_remaining,
+                            "committed": player.committed_total,
+                            "status": match player.status {
+                                PlayerStatus::Active => "active",
+                                PlayerStatus::Folded => "folded",
+                                PlayerStatus::AllIn => "all_in",
+                                PlayerStatus::OutOfHand => "out_of_hand",
+                            },
+                        })
+                    })
+                    .collect::<Vec<_>>(),
+                "actions": actions,
+                "chance": chance,
+                "terminal": terminal,
+            })
+        })
+        .collect()
 }
 
 fn aggregate_hero_report(
@@ -570,6 +665,42 @@ mod tests {
                 - 1.0)
                 .abs()
                 < 1e-9
+        );
+    }
+
+    #[test]
+    fn spot_result_exposes_consistent_tree_index() {
+        let config = config();
+        let tree = config.build_tree().unwrap();
+        let result = config.solve(2, 1).unwrap();
+        assert_eq!(result.tree_index.len(), tree.nodes.len());
+        for (node, entry) in tree.nodes.iter().zip(result.tree_index.iter()) {
+            assert_eq!(entry["id"], serde_json::json!(node.id));
+            let mut listed: Vec<u64> = entry["actions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|edge| edge["child"].as_u64().unwrap())
+                .collect();
+            if let Some(chance) = entry["chance"].as_array() {
+                listed.extend(chance.iter().map(|edge| edge["child"].as_u64().unwrap()));
+            }
+            listed.sort_unstable();
+            let mut expected: Vec<u64> = node.children.iter().map(|&child| child as u64).collect();
+            expected.sort_unstable();
+            assert_eq!(listed, expected, "children mismatch at node {}", node.id);
+        }
+        let hero_entry = &result.tree_index[result.hero.public_node];
+        assert_eq!(hero_entry["actor"], serde_json::json!(config.hero_player));
+        assert!(!hero_entry["actions"].as_array().unwrap().is_empty());
+        let value: serde_json::Value = serde_json::from_str(&result.to_json().unwrap()).unwrap();
+        assert_eq!(
+            value["schema_version"],
+            serde_json::json!(crate::multiway_spot::MULTIWAY_HOLDEM_SPOT_RESULT_SCHEMA_VERSION)
+        );
+        assert_eq!(
+            value["tree_index"].as_array().unwrap().len(),
+            tree.nodes.len()
         );
     }
 }

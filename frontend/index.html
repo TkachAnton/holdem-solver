@@ -284,6 +284,12 @@
     .analysis-tab { height: 43px; padding-top: 12px; color: #898989; font-size: 13px; }
     .analysis-tab.active { color: #f0f0f0; border-bottom: 2px solid #cfcfcf; }
     .matrix-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 13px 0 10px; }
+    .node-nav { display: flex; align-items: center; gap: 10px; padding: 8px 15px; border-bottom: 1px solid #3b3b3b; flex-wrap: wrap; }
+    .node-nav-label { color: #858585; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+    .node-nav select { background: #1a1a1a; color: #eaeaea; border: 1px solid #3f3f3f; border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 13px; max-width: 460px; }
+    .node-edges { display: flex; gap: 6px; flex-wrap: wrap; }
+    .node-chip { background: #242424; border: 1px solid #3f3f3f; color: #d8d8d8; border-radius: 999px; padding: 3px 10px; font-size: 12px; cursor: pointer; }
+    .node-chip:hover { border-color: #666; }
     .matrix-toolbar strong { display: inline-block; color: #efefef; font-size: 15px; }
     .matrix-toolbar strong + span { margin-left: 10px; color: #858585; font-size: 12px; }
     .matrix-legend { display: flex; flex-wrap: wrap; gap: 11px; color: #a0a0a0; font-size: 11px; }
@@ -463,10 +469,16 @@
           </div>
         </div>
         <div id="decisionStrip" class="decision-strip"></div>
+        <div id="nodeNav" class="node-nav" hidden>
+          <span class="node-nav-label">Узел дерева</span>
+          <select id="nodeSelect" title="Навигация по решённому дереву — без нового solve"></select>
+          <span id="nodeEdges" class="node-edges"></span>
+          <button id="nodeBackHero" class="button ghost small" type="button">К hero</button>
+        </div>
         <div class="analysis-grid">
           <section class="matrix-panel">
             <div class="analysis-tabs" role="tablist" aria-label="Analysis views"><button class="analysis-tab active" type="button" data-analysis-tab="strategy" role="tab" aria-selected="true">Стратегия</button><button class="analysis-tab" type="button" data-analysis-tab="range" role="tab" aria-selected="false">Диапазон</button><button class="analysis-tab" type="button" data-analysis-tab="diagnostics" role="tab" aria-selected="false">Диагностика</button></div>
-            <div class="matrix-toolbar"><div><strong>13×13 стратегия hero</strong><span id="matrixCaption">—</span></div><div id="matrixLegend" class="matrix-legend"><span><i class="legend-swatch raise"></i>Raise</span><span><i class="legend-swatch call"></i>Call</span><span><i class="legend-swatch fold"></i>Fold</span><span><i class="legend-swatch check"></i>Check</span><span><i class="legend-swatch push"></i>Push</span></div></div>
+            <div class="matrix-toolbar"><div><strong id="matrixTitle">13×13 стратегия hero</strong><span id="matrixCaption">—</span></div><div id="matrixLegend" class="matrix-legend"><span><i class="legend-swatch raise"></i>Raise</span><span><i class="legend-swatch call"></i>Call</span><span><i class="legend-swatch fold"></i>Fold</span><span><i class="legend-swatch check"></i>Check</span><span><i class="legend-swatch push"></i>Push</span></div></div>
             <div class="matrix-wrap"><div class="matrix-axis top" id="matrixColumns"></div><div class="matrix-row"><div class="matrix-axis side" id="matrixRows"></div><div id="handMatrix" class="hand-matrix"></div></div></div>
             <div class="matrix-foot"><span id="matrixFootnote">Цвет — доминирующее действие, число — его частота, полоска — весь микс. Серые ячейки solver не посещал.</span><span id="matrixCoverage">—</span></div>
           </section>
@@ -587,6 +599,7 @@
                 <div class="field span-4"><label for="workerCount">Worker count</label><input id="workerCount" type="number" min="1" value="2"></div>
                 <div class="field span-4"><label for="reductionBatch">Reduction batch</label><input id="reductionBatch" type="number" min="1" value="2"></div>
                 <div class="field span-4"><label for="seed">Seed</label><input id="seed" type="number" min="0" value="20260910"></div>
+                <div class="field span-8"><label for="maxAttempts">Max private attempts</label><input id="maxAttempts" type="number" min="1000" value="100000"><span class="hint">Бюджет поиска легальных 8-max раздач. Ошибку «could not sample a legal multiway private deal» лечит в первую очередь расширение ranges, затем — это число.</span></div>
               </div>
             </div>
           </section>
@@ -620,7 +633,7 @@
   <script>
     (() => {
       const $ = (id) => document.getElementById(id);
-      const state = { jobId: null, pollTimer: null, busy: false, currentJob: null, currentResult: null, selectedClass: null, analysisTab: 'strategy' };
+      const state = { jobId: null, pollTimer: null, busy: false, currentJob: null, currentResult: null, selectedClass: null, analysisTab: 'strategy', nodeId: null };
       const defaultRanges = [
         'AA-TT, AKs-ATs, KQs-KTs, QJs', 'AJo',
         'AA-TT, AKs-ATs, KQs-KTs, QJs', 'AA-TT, AKs-ATs, KQs-KTs, QJs',
@@ -781,7 +794,7 @@
           execution: {
             seed: number('seed', 20260910), target_iterations: number('iterations', 1000),
             checkpoint_interval: number('checkpointInterval', 100), keep_checkpoints: number('keepCheckpoints', 5),
-            max_private_attempts: 10000, worker_count: number('workerCount', 2),
+            max_private_attempts: number('maxAttempts', 100000), worker_count: number('workerCount', 2),
             reduction_batch_size: number('reductionBatch', 2), config_fingerprint: 0
           }
         };
@@ -808,7 +821,7 @@
         const formatChance = (outcomes) => (outcomes || []).map((outcome) => `${outcome.cards} | ${outcome.probability}`).join('\n');
         setField('flopCards', formatChance(tree.chance?.flop)); setField('turnCard', formatChance(tree.chance?.turn)); setField('riverCard', formatChance(tree.chance?.river));
         if ($('enumerateExact')) $('enumerateExact').checked = Boolean(tree.chance?.enumerate_exact); setField('maxOutcomes', tree.chance?.max_outcomes_per_node || 10000);
-        const execution = job.execution || {}; setField('seed', execution.seed); setField('iterations', execution.target_iterations || 1000); setField('checkpointInterval', execution.checkpoint_interval || 100); setField('keepCheckpoints', execution.keep_checkpoints || 5); setField('workerCount', execution.worker_count || 1); setField('reductionBatch', execution.reduction_batch_size || 1);
+        const execution = job.execution || {}; setField('seed', execution.seed); setField('iterations', execution.target_iterations || 1000); setField('checkpointInterval', execution.checkpoint_interval || 100); setField('keepCheckpoints', execution.keep_checkpoints || 5); setField('workerCount', execution.worker_count || 1); setField('reductionBatch', execution.reduction_batch_size || 1); setField('maxAttempts', execution.max_private_attempts || 100000);
         resetAnswer(); state.currentJob = job; setSetupVisible(true); notify('JSON job загружен в форму.');
       }
       async function api(path, options = {}) {
@@ -898,8 +911,9 @@
       }
       function averageClassActions(result) {
         const hero = result.hero || {};
-        const infosets = (result.strategy_report?.infosets || []).filter((info) => info.player === hero.player && info.public_node === (hero.public_node ?? 0));
-        const source = infosets.length ? infosets : (hero.observed_hands || []);
+        const ctx = nodeContext(result);
+        const infosets = infosetsForContext(result, ctx);
+        const source = infosets.length ? infosets : (ctx.isHero ? (hero.observed_hands || []) : []);
         const buckets = new Map();
         source.forEach((hand) => {
           const name = classFromCards(hand.private_cards); if (!name) return;
@@ -956,25 +970,72 @@
         const value = actionEv(item);
         return value === null ? 'EV — not exported' : `EV ${formatNumber(value, 3)}`;
       }
-      function classInfosets(result, className) {
+      function nodeContext(result) {
         const hero = result?.hero || {};
-        return (result?.strategy_report?.infosets || []).filter((info) => info.player === hero.player && info.public_node === (hero.public_node ?? 0) && classFromCards(info.private_cards) === className);
+        const heroNode = hero.public_node ?? 0;
+        const idx = result?.tree_index || [];
+        if (state.nodeId == null || !idx.length) return { player: hero.player, node: heroNode, entry: idx[heroNode] || null, isHero: true, actor: hero.player };
+        const entry = idx[state.nodeId] || null;
+        return { player: entry?.actor ?? null, node: state.nodeId, entry, isHero: false, actor: entry?.actor ?? null };
+      }
+      function infosetsForContext(result, ctx) {
+        return (result?.strategy_report?.infosets || []).filter((info) => info.player === ctx.player && info.public_node === ctx.node);
+      }
+      function classInfosets(result, className) {
+        return infosetsForContext(result, nodeContext(result)).filter((info) => classFromCards(info.private_cards) === className);
+      }
+      function populateNodeNav(result) {
+        const nav = $('nodeNav'); const sel = $('nodeSelect');
+        const idx = result?.tree_index || [];
+        if (!idx.length) { nav.hidden = true; sel.innerHTML = ''; $('nodeEdges').innerHTML = ''; return; }
+        nav.hidden = false;
+        const hero = result.hero || {}; const heroNode = hero.public_node ?? 0;
+        const opts = [`<option value="hero">★ hero · ${escapeHtml(String(hero.label || 'hero'))} (#${heroNode})</option>`];
+        idx.forEach((entry, id) => {
+          if (entry.actor == null || id === heroNode) return;
+          const board = entry.board?.length ? ` · ${formatCards(entry.board)}` : '';
+          opts.push(`<option value="${id}">#${id} · ${seatLabel(entry.actor)} · ${entry.street}${board} · pot ${entry.pot}</option>`);
+        });
+        sel.innerHTML = opts.join('');
+        sel.value = state.nodeId == null ? 'hero' : String(state.nodeId);
+        renderNodeEdges(result);
+      }
+      function renderNodeEdges(result) {
+        const ctx = nodeContext(result);
+        const entry = ctx.entry || result?.tree_index?.[ctx.node];
+        const edges = entry?.actions || [];
+        $('nodeEdges').innerHTML = edges.length ? edges.map((edge) => `<button class="node-chip" type="button" data-child="${edge.child}" title="перейти к ответу оппонента">${escapeHtml(actionLabel(edge.action?.kind, edge.action?.to))} → #${edge.child}</button>`).join('') : (entry?.terminal ? '<span class="muted">terminal</span>' : '');
+        document.querySelectorAll('#nodeEdges .node-chip').forEach((chip) => chip.addEventListener('click', () => selectTreeNode(chip.dataset.child)));
+      }
+      function selectTreeNode(value) {
+        const result = state.currentResult;
+        if (!result?.tree_index?.length) return;
+        const numeric = Number(value);
+        state.nodeId = value == null || value === 'hero' || !Number.isFinite(numeric) ? null : numeric;
+        state.selectedClass = null;
+        const sel = $('nodeSelect');
+        const want = String(state.nodeId ?? 'hero');
+        if (state.nodeId != null && sel && ![...sel.options].some((option) => option.value === want)) {
+          sel.insertAdjacentHTML('beforeend', `<option value="${state.nodeId}">#${state.nodeId} (нелинейный переход)</option>`);
+        }
+        if (sel) sel.value = want;
+        renderMatrix(result);
+        renderNodeEdges(result);
       }
       function observedHeroHands(result, className) {
         return (result?.hero?.observed_hands || []).filter((hand) => classFromCards(hand.private_cards) === className);
       }
       function classCoverageMap(result) {
-        const hero = result?.hero || {}; const counts = new Map(); const seen = new Set();
-        (result?.strategy_report?.infosets || []).forEach((info) => {
-          if (info.player !== hero.player || info.public_node !== (hero.public_node ?? 0)) return;
+        const hero = result?.hero || {}; const ctx = nodeContext(result); const counts = new Map(); const seen = new Set();
+        infosetsForContext(result, ctx).forEach((info) => {
           const name = classFromCards(info.private_cards); if (!name) return; const key = `${name}:${comboKey(info.private_cards)}`;
           if (!seen.has(key)) { seen.add(key); counts.set(name, (counts.get(name) || 0) + 1); }
         });
-        (hero.observed_hands || []).forEach((hand) => { const name = classFromCards(hand.private_cards); if (!name) return; const key = `${name}:${comboKey(hand.private_cards)}`; if (!seen.has(key)) { seen.add(key); counts.set(name, (counts.get(name) || 0) + 1); } });
+        if (ctx.isHero) (hero.observed_hands || []).forEach((hand) => { const name = classFromCards(hand.private_cards); if (!name) return; const key = `${name}:${comboKey(hand.private_cards)}`; if (!seen.has(key)) { seen.add(key); counts.set(name, (counts.get(name) || 0) + 1); } });
         return counts;
       }
       function selectedClassActions(result, className) {
-        const infosets = classInfosets(result, className); const hands = infosets.length ? infosets : observedHeroHands(result, className);
+        const infosets = classInfosets(result, className); const hands = infosets.length ? infosets : (nodeContext(result).isHero ? observedHeroHands(result, className) : []);
         if (!hands.length) return null;
         const bucket = new Map(); let totalWeight = 0;
         hands.forEach((hand) => {
@@ -990,7 +1051,7 @@
           $('blockerSummary').innerHTML = '';
           return;
         }
-        const result = state.currentResult; const hero = result.hero || {}; const infosets = classInfosets(result, className); const observed = observedHeroHands(result, className);
+        const result = state.currentResult; const hero = result.hero || {}; const infosets = classInfosets(result, className); const observed = nodeContext(result).isHero ? observedHeroHands(result, className) : [];
         const infoByCombo = new Map();
         infosets.forEach((info) => infoByCombo.set(comboKey(info.private_cards), info));
         observed.forEach((hand) => { if (!infoByCombo.has(comboKey(hand.private_cards))) infoByCombo.set(comboKey(hand.private_cards), hand); });
@@ -1065,7 +1126,8 @@
         renderActionBreakdown(list || [], className);
       }
       function renderMatrix(result) {
-        const hero = result.hero || {}; const byClass = averageClassActions(result); const coverage = classCoverageMap(result); const firstInfoset = (result.strategy_report?.infosets || []).find((info) => info.player === hero.player && info.public_node === (hero.public_node ?? 0)); const heroClass = classFromCards(hero.observed_hands?.[0]?.private_cards) || classFromCards(firstInfoset?.private_cards);
+        const hero = result.hero || {}; const ctx = nodeContext(result); const byClass = averageClassActions(result); const coverage = classCoverageMap(result); const firstInfoset = infosetsForContext(result, ctx)[0]; const heroClass = ctx.isHero ? (classFromCards(hero.observed_hands?.[0]?.private_cards) || classFromCards(firstInfoset?.private_cards)) : null;
+        $('matrixTitle').textContent = ctx.isHero ? '13×13 стратегия hero' : (ctx.actor == null ? `Узел #${ctx.node} · решения нет` : `13×13 · ${seatLabel(ctx.actor)}`);
         $('matrixColumns').innerHTML = matrixRanks.map((rank) => `<div>${rank}</div>`).join('');
         $('matrixRows').innerHTML = matrixRanks.map((rank) => `<div>${rank}</div>`).join('');
         $('handMatrix').innerHTML = matrixRanks.flatMap((_, row) => matrixRanks.map((_, column) => {
@@ -1076,8 +1138,8 @@
           const modeClass = rangeMode ? (observedCombos === 0 ? 'range-empty' : (observedCombos < totalCombos ? 'range-partial' : 'range-covered')) : dominant;
           return `<button class="hand-cell ${modeClass} ${isHero ? 'hero-class' : ''} ${isSelected ? 'selected' : ''}" type="button" title="${escapeHtml(title)}" data-class="${name}"><span class="cell-name">${name}</span><span class="cell-frequency">${rangeMode ? rangePercent : strategyPercent}</span>${rangeMode ? '' : (actions ? `<span class="cell-bar">${actionBar(actions)}</span>` : '')}</button>`;
         })).join('');
-        $('matrixCaption').textContent = state.analysisTab === 'range' ? `${hero.label || 'Hero'} · exact combo coverage` : `${hero.label || 'Hero'} · ${byClass.size} computed classes · ${hero.observed_hands?.length || 0}/${hero.requested_hands || 0} requested combos`;
-        $('matrixCoverage').textContent = `observed ${(Number(hero.observed_weight || 0)).toFixed(2)} / requested ${(Number(hero.requested_weight || 0)).toFixed(2)}`;
+        $('matrixCaption').textContent = !ctx.isHero && ctx.entry ? `${ctx.entry.street}${ctx.entry.board?.length ? ' · ' + formatCards(ctx.entry.board) : ''} · pot ${ctx.entry.pot}${(result.strategy_report?.infosets || []).filter((i) => i.player === ctx.player && i.public_node === ctx.node).length ? '' : ' · нет данных (мало итераций)'}` : state.analysisTab === 'range' ? `${hero.label || 'Hero'} · exact combo coverage` : `${hero.label || 'Hero'} · ${byClass.size} computed classes · ${hero.observed_hands?.length || 0}/${hero.requested_hands || 0} requested combos`;
+        $('matrixCoverage').textContent = ctx.isHero ? `observed ${(Number(hero.observed_weight || 0)).toFixed(2)} / requested ${(Number(hero.requested_weight || 0)).toFixed(2)}` : `visit-weighted avg по посещённым combo узла`;
         $('matrixFootnote').textContent = state.analysisTab === 'range' ? 'Вид диапазона: N/M — сколько combo класса увидел solver. Серый — покрытие, не действие.' : 'Цвет — доминирующее действие, число — его частота, полоска — весь микс. Серые ячейки solver не посещал.';
         const selected = state.selectedClass || heroClass;
         if (selected) selectMatrixCell(selected, byClass.get(selected)); else { renderSelectionInspector(null); renderActionBreakdown(hero.actions || [], hero.label || 'Hero'); }
@@ -1089,7 +1151,7 @@
         $('actionStack').innerHTML = actionBar(list); $('actionEvNote').textContent = hasEv ? 'EV/utility из result JSON; проверяйте normalization и pot context.' : 'Per-action EV не экспортирован; positive regret не является EV.';
       }
       function renderAnalysis(result) {
-        state.currentResult = result; const hero = result.hero || {}; const observed = hero.observed_hands?.length || 0; const missing = hero.missing_hands?.length || 0;
+        state.currentResult = result; state.nodeId = null; const hero = result.hero || {}; const observed = hero.observed_hands?.length || 0; const missing = hero.missing_hands?.length || 0;
         $('analysisTitle').textContent = `${hero.label || 'Hero'} strategy`;
         $('analysisSubtitle').textContent = `${observed}/${hero.requested_hands || 0} exact combos observed · result is conditional on the current continuation ranges.`;
         $('analysisStatus').textContent = 'Completed'; $('analysisStatus').className = 'pill completed'; $('analysisProgress').textContent = $('progressText').textContent; $('analysisCancelButton').classList.add('hidden');
@@ -1097,7 +1159,7 @@
         $('analysisIterations').textContent = $('progressText').textContent.split('/')[0].trim() || '—';
         $('analysisObservedWeight').textContent = Number(hero.observed_weight || 0).toFixed(2);
         $('analysisMissingHands').textContent = String(missing);
-        renderDecisionStrip(); renderTableDiagram(); renderConvergence(result); renderMatrix(result);
+        renderDecisionStrip(); renderTableDiagram(); renderConvergence(result); renderMatrix(result); populateNodeNav(result);
         $('analysisWorkspace').classList.remove('hidden'); $('answerPanel').classList.add('hidden');
         window.setTimeout(() => $('analysisWorkspace').scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
       }
@@ -1213,7 +1275,9 @@
       $('addHistoryButton').addEventListener('click', () => { addHistoryRow(); renderDecisionStrip(); });
       ['tableSize'].forEach((id) => $(id).addEventListener('change', () => { syncSeatControls(); renderRanges(); renderDecisionStrip(); renderTableDiagram(); }));
       $('heroSeat').addEventListener('change', () => { renderRanges(); renderDecisionStrip(); renderTableDiagram(); });
-      $('buttonSeat').addEventListener('input', () => { syncSeatControls(); renderRanges(); renderDecisionStrip(); renderTableDiagram(); });
+      $('buttonSeat').addEventListener('input', () => { syncSeatControls();
+      $('nodeSelect').addEventListener('change', (event) => selectTreeNode(event.target.value));
+      $('nodeBackHero').addEventListener('click', () => selectTreeNode('hero')); renderRanges(); renderDecisionStrip(); renderTableDiagram(); });
       ['smallBlind', 'bigBlind', 'ante'].forEach((id) => $(id).addEventListener('input', renderTableDiagram));
       document.querySelectorAll('[data-analysis-tab]').forEach((button) => button.addEventListener('click', () => setAnalysisTab(button.dataset.analysisTab)));
       $('clearSelectionButton').addEventListener('click', () => { state.selectedClass = null; document.querySelectorAll('.hand-cell').forEach((cell) => cell.classList.remove('selected')); renderSelectionInspector(null); if (state.currentResult) renderActionBreakdown(state.currentResult.hero?.actions || [], 'Hero aggregate'); });

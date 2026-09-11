@@ -15,11 +15,11 @@ if errorlevel 1 (
     exit /b 1
 )
 
-if /i "%~1"=="rebuild" goto build
-if exist "%BIN%" goto run
+rem Always run an incremental release build: a few seconds when nothing changed,
+rem and the only way to pick up frontend edits (UI is embedded into the exe).
 
 :build
-echo [holdem] First run: building the solver ^(one time, a few minutes^)...
+echo [holdem] Building the solver ^(incremental; first run takes minutes^)...
 cargo +1.75.0 build --release -p holdem-solver-server
 if errorlevel 1 (
     echo [holdem] Build failed. See the compiler output above.
@@ -49,5 +49,5 @@ if errorlevel 1 goto waitloop
 start "" http://127.0.0.1:%PORT%/
 echo [holdem] UI is open in your browser. Jobs are stored in: %DATA%
 echo [holdem] Keep this window open while you work. Close it to stop the server.
-echo [holdem] Rebuild after code changes: start-solver.bat rebuild
+echo [holdem] Full clean rebuild: stop-solver.bat, rmdir /s /q target, then run start-solver.bat
 pause

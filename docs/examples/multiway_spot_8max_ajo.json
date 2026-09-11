@@ -7,27 +7,71 @@
     "big_blind": 200,
     "ante": 0,
     "ante_mode": "none",
-    "stacks": [16000, 16000, 16000, 16000, 16000, 16000, 16000, 16000],
+    "stacks": [
+      16000,
+      16000,
+      16000,
+      16000,
+      16000,
+      16000,
+      16000,
+      16000
+    ],
     "dead_money": 0
   },
   "dead_cards": "",
   "history": [
-    { "player": 3, "kind": "fold" },
-    { "player": 4, "kind": "fold" },
-    { "player": 5, "kind": "raise", "to": 500 },
-    { "player": 6, "kind": "fold" },
-    { "player": 7, "kind": "fold" },
-    { "player": 0, "kind": "call" }
+    {
+      "player": 3,
+      "kind": "fold"
+    },
+    {
+      "player": 4,
+      "kind": "fold"
+    },
+    {
+      "player": 5,
+      "kind": "raise",
+      "to": 500
+    },
+    {
+      "player": 6,
+      "kind": "fold"
+    },
+    {
+      "player": 7,
+      "kind": "fold"
+    },
+    {
+      "player": 0,
+      "kind": "call"
+    }
   ],
   "ranges": [
-    { "range": "AA-TT, AKs-ATs, KQs-KTs, QJs" },
-    { "range": "AJo" },
-    { "range": "AA-TT, AKs-ATs, KQs-KTs, QJs" },
-    { "range": "AA-TT, AKs-ATs, KQs-KTs, QJs" },
-    { "range": "AA-TT, AKs-ATs, KQs-KTs, QJs" },
-    { "range": "AA-TT, AKs-ATs, KQs-KTs, QJs" },
-    { "range": "AA-TT, AKs-ATs, KQs-KTs, QJs" },
-    { "range": "AA-TT, AKs-ATs, KQs-KTs, QJs" }
+    {
+      "range": "AA-TT, AKs-ATs, KQs-KTs, QJs"
+    },
+    {
+      "range": "AJo"
+    },
+    {
+      "range": "AA-TT, AKs-ATs, KQs-KTs, QJs"
+    },
+    {
+      "range": "AA-TT, AKs-ATs, KQs-KTs, QJs"
+    },
+    {
+      "range": "AA-TT, AKs-ATs, KQs-KTs, QJs"
+    },
+    {
+      "range": "AA-TT, AKs-ATs, KQs-KTs, QJs"
+    },
+    {
+      "range": "AA-TT, AKs-ATs, KQs-KTs, QJs"
+    },
+    {
+      "range": "AA-TT, AKs-ATs, KQs-KTs, QJs"
+    }
   ],
   "hero": {
     "player": 1,
@@ -39,7 +83,9 @@
     "max_nodes": 100000,
     "max_depth": 64,
     "preflop": {
-      "explicit_raise_to": [1600],
+      "explicit_raise_to": [
+        1600
+      ],
       "include_all_in": false
     },
     "flop": {},
@@ -47,13 +93,22 @@
     "river": {},
     "chance": {
       "flop": [
-        { "cards": "2s 7d 9c", "probability": 1.0 }
+        {
+          "cards": "2s 7d 9c",
+          "probability": 1.0
+        }
       ],
       "turn": [
-        { "cards": "5h", "probability": 1.0 }
+        {
+          "cards": "5h",
+          "probability": 1.0
+        }
       ],
       "river": [
-        { "cards": "3h", "probability": 1.0 }
+        {
+          "cards": "3h",
+          "probability": 1.0
+        }
       ],
       "enumerate_exact": false,
       "max_outcomes_per_node": 10000
@@ -64,7 +119,7 @@
     "target_iterations": 10000,
     "checkpoint_interval": 1000,
     "keep_checkpoints": 5,
-    "max_private_attempts": 10000,
+    "max_private_attempts": 100000,
     "worker_count": 4,
     "reduction_batch_size": 8,
     "config_fingerprint": 0

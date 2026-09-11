@@ -55,6 +55,7 @@ pub use multiway_job::{
 pub use multiway_spot::{
     MultiwayHoldemSpotAction, MultiwayHoldemSpotConfig, MultiwayHoldemSpotHeroHandReport,
     MultiwayHoldemSpotHeroReport, MultiwayHoldemSpotResult, MultiwayHoldemSpotTreeConfig,
+    MULTIWAY_HOLDEM_SPOT_RESULT_SCHEMA_VERSION,
 };
 pub use multiway_spot_json::{
     MultiwayHoldemSpotActionJson, MultiwayHoldemSpotActionKindJson, MultiwayHoldemSpotAnteModeJson,

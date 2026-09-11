@@ -27,6 +27,7 @@
 6. `Запустить solve` — статус `Queued → Running → Completed`.
 7. По завершении на главном экране сама появляется **13×13 матрица hero**: цвет — доминирующее действие (Raise красный, Call зелёный, Fold синий, Check жёлтый, Push фиолетовый), число — частота, полоска внизу ячейки — полный микс.
 8. Клик по ячейке — combo inspector: точные комбинации класса, visits, blockers. Вкладки сверху: `Стратегия`, `Диапазон` (покрытие exact combos), `Диагностика` (regret/SE/drift).
+9. Если результат содержит `tree_index` (result schema 2+), над матрицей появляется панель `Узел дерева`: в селекторе — все decision-узлы решённого дерева (`#id · позиция · street · board · pot`), выбор узла показывает частоты его актёра (ответ оппонента) без нового solve; чипы действий рядом переходят в child-узел, кнопка `К hero` возвращает. Данные opponent-узлов приходят в том же result (infosets всех игроков); при малом числе итераций они разрежены — это ограничение выборки, а не навигации.
 
 Ниже — ручные команды для тех, кому нужен контроль вместо bat-файла.
 
@@ -369,7 +370,7 @@ strategy = f(history, ranges, tree abstraction, public-card policy, iterations)
 
 ### `could not sample a legal multiway private deal`
 
-Ranges слишком узкие, конфликтуют друг с другом или с board/dead cards. Расширьте ranges, увеличьте `max_private_attempts` или проверьте blockers.
+Ranges слишком узкие, конфликтуют друг с другом или с board/dead cards. Расширьте ranges, увеличьте `max_private_attempts` или проверьте blockers. В UI это отдельное поле `Max private attempts` в блоке execution (по умолчанию 100000); в JSON job — `execution.max_private_attempts`. На demo-фикстуре с узкими ranges при `Utility samples` 32+ бюджет 10000 заканчивается — поднимайте attempts или ставьте utility samples 1 для быстрого теста.
 
 ### `no requested hero combo was visited`
 
