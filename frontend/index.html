@@ -1,0 +1,1215 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Hold'em Lab — Native Solver Workspace</title>
+  <style>
+    :root {
+      --bg: #181818;
+      --bg-soft: #202020;
+      --panel: #242424;
+      --panel-strong: #2b2b2b;
+      --panel-soft: #1d1d1d;
+      --line: #474747;
+      --line-soft: #343434;
+      --text: #ededed;
+      --muted: #b5b5b5;
+      --faint: #858585;
+      --accent: #d2d2d2;
+      --accent-strong: #e2e2e2;
+      --accent-soft: rgba(220, 220, 220, .10);
+      --green: #b7ef9c;
+      --green-soft: rgba(183, 239, 156, .14);
+      --amber: #d5b36b;
+      --amber-soft: rgba(213, 179, 107, .14);
+      --red: #e97878;
+      --red-soft: rgba(233, 120, 120, .14);
+      --fold: #3f7eb2;
+      --call: #747474;
+      --raise: #ef4347;
+      --allin: #8c2025;
+      --shadow: none;
+      --radius: 5px;
+      --radius-small: 3px;
+    }
+
+    * { box-sizing: border-box; }
+    html { min-width: 320px; background: var(--bg); }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 16px;
+      line-height: 1.5;
+    }
+    button, input, select, textarea { font: inherit; }
+    button { cursor: pointer; }
+    button:disabled { cursor: wait; opacity: .55; }
+    a { color: var(--accent); }
+
+    .app-shell { min-height: 100vh; }
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      min-height: 76px;
+      padding: 14px clamp(18px, 4vw, 56px);
+      background: rgba(10, 15, 29, .94);
+      border-bottom: 1px solid var(--line-soft);
+      backdrop-filter: blur(16px);
+    }
+    .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .brand-mark {
+      display: grid;
+      place-items: center;
+      width: 40px;
+      height: 40px;
+      border: 1px solid #5775c2;
+      border-radius: 12px;
+      color: #dce6ff;
+      background: #1a2a50;
+      font-weight: 800;
+      letter-spacing: -.05em;
+    }
+    .brand-copy { min-width: 0; }
+    .brand-title { font-size: 18px; font-weight: 750; letter-spacing: -.02em; }
+    .brand-subtitle { color: var(--faint); font-size: 12px; white-space: nowrap; }
+    .server-state { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 13px; }
+    .state-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 0 4px var(--amber-soft); }
+    .server-state.online .state-dot { background: var(--green); box-shadow: 0 0 0 4px var(--green-soft); }
+    .server-state.offline .state-dot { background: var(--red); box-shadow: 0 0 0 4px var(--red-soft); }
+
+    .main { width: min(1480px, calc(100% - 36px)); margin: 0 auto; padding: 42px 0 70px; }
+    .hero {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 32px;
+      margin-bottom: 32px;
+    }
+    .eyebrow { color: var(--accent); font-size: 13px; font-weight: 750; letter-spacing: .1em; text-transform: uppercase; }
+    h1 { margin: 8px 0 10px; font-size: clamp(30px, 4vw, 48px); line-height: 1.08; letter-spacing: -.045em; }
+    .hero-copy { max-width: 720px; }
+    .hero-copy p { max-width: 660px; margin: 0; color: var(--muted); font-size: 15px; }
+    .hero h1 { font-size: clamp(28px, 3vw, 36px); }
+    .hero-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
+
+    .workspace-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(340px, .8fr); align-items: start; gap: 22px; }
+    .stack { display: grid; gap: 18px; }
+    .results-column { position: sticky; top: 98px; display: grid; gap: 18px; }
+    .panel {
+      overflow: hidden;
+      background: var(--panel);
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 22px 24px 16px; }
+    .panel-title { display: flex; align-items: center; gap: 11px; margin: 0; font-size: 19px; letter-spacing: -.02em; }
+    .step {
+      display: grid;
+      place-items: center;
+      width: 27px;
+      height: 27px;
+      border-radius: 9px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 800;
+    }
+    .panel-description { margin: 5px 0 0 38px; color: var(--muted); font-size: 14px; }
+    .panel-body { padding: 0 24px 24px; }
+    .panel-note { margin: 2px 0 18px; color: var(--muted); font-size: 14px; }
+    .panel-note strong { color: var(--text); font-weight: 650; }
+
+    .field-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 15px; }
+    .field { display: grid; gap: 7px; min-width: 0; }
+    .field.span-3 { grid-column: span 3; }
+    .field.span-4 { grid-column: span 4; }
+    .field.span-5 { grid-column: span 5; }
+    .field.span-6 { grid-column: span 6; }
+    .field.span-8 { grid-column: span 8; }
+    .field.span-12 { grid-column: span 12; }
+    label, .label { color: var(--muted); font-size: 13px; font-weight: 650; }
+    input, select, textarea {
+      width: 100%;
+      color: var(--text);
+      background: var(--panel-soft);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-small);
+      outline: none;
+      transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+    }
+    input, select { min-height: 44px; padding: 9px 12px; }
+    textarea { min-height: 100px; resize: vertical; padding: 11px 12px; }
+    input::placeholder, textarea::placeholder { color: #5f7090; }
+    input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); background: #121e36; }
+    .input-with-suffix { position: relative; }
+    .input-with-suffix input { padding-right: 48px; }
+    .suffix { position: absolute; top: 50%; right: 13px; transform: translateY(-50%); color: var(--faint); pointer-events: none; }
+    .hint { color: var(--faint); font-size: 12px; }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      min-height: 44px;
+      padding: 9px 16px;
+      border: 1px solid transparent;
+      border-radius: 11px;
+      font-size: 14px;
+      font-weight: 750;
+      transition: transform .15s ease, border-color .15s ease, background .15s ease;
+    }
+    .button:hover:not(:disabled) { transform: translateY(-1px); }
+    .button.primary { color: #081126; background: var(--accent); border-color: #9bb7ff; }
+    .button.primary:hover:not(:disabled) { background: #a1bbff; }
+    .button.secondary { color: var(--text); background: #1a2945; border-color: #38517d; }
+    .button.secondary:hover:not(:disabled) { background: #213454; }
+    .button.ghost { color: var(--muted); background: transparent; border-color: var(--line); }
+    .button.ghost:hover:not(:disabled) { color: var(--text); border-color: #4b6595; }
+    .button.danger { color: #ffdfe4; background: var(--red-soft); border-color: rgba(241, 139, 155, .38); }
+    .button.small { min-height: 36px; padding: 6px 11px; font-size: 13px; }
+
+    .history-list { display: grid; gap: 9px; }
+    .history-row { display: grid; grid-template-columns: 30px minmax(90px, .55fr) minmax(120px, .8fr) minmax(100px, .7fr) 36px; align-items: center; gap: 9px; }
+    .history-row select, .history-row input { min-height: 40px; }
+    .row-number { color: var(--faint); font-size: 13px; font-variant-numeric: tabular-nums; text-align: center; }
+    .remove-row { width: 36px; height: 36px; padding: 0; color: var(--muted); background: transparent; border: 1px solid transparent; border-radius: 9px; font-size: 19px; }
+    .remove-row:hover { color: var(--red); background: var(--red-soft); border-color: rgba(241, 139, 155, .25); }
+    .history-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; }
+    .target-field.is-hidden { visibility: hidden; }
+
+    .range-grid { display: grid; gap: 9px; }
+    .range-row { display: grid; grid-template-columns: 90px minmax(0, 1fr); align-items: center; gap: 12px; }
+    .range-seat { color: var(--text); font-size: 14px; font-weight: 700; }
+    .range-seat span { display: block; color: var(--faint); font-size: 11px; font-weight: 500; }
+    .range-row input { min-height: 40px; }
+
+    details { border-top: 1px solid var(--line-soft); }
+    details:first-child { border-top: 0; }
+    summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 17px 0; color: var(--text); cursor: pointer; font-weight: 700; list-style: none; }
+    summary::-webkit-details-marker { display: none; }
+    summary::after { content: "+"; color: var(--accent); font-size: 20px; font-weight: 400; }
+    details[open] summary::after { content: "−"; }
+    .details-content { padding: 0 0 19px; }
+    .street-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 5px; }
+    .street-card { padding: 14px; background: var(--panel-soft); border: 1px solid var(--line-soft); border-radius: 12px; }
+    .street-card h3 { margin: 0 0 12px; color: var(--text); font-size: 14px; }
+    .street-card .field { margin-top: 10px; }
+    .checkline { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 13px; }
+    .checkline input { width: 17px; height: 17px; min-height: 17px; accent-color: var(--accent-strong); }
+
+    .status-panel { padding: 22px; }
+    .status-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+    .status-label { color: var(--faint); font-size: 12px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+    .status-value { margin-top: 4px; font-size: 26px; font-weight: 780; letter-spacing: -.03em; }
+    .pill { display: inline-flex; align-items: center; min-height: 30px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--panel-soft); font-size: 12px; font-weight: 750; }
+    .pill.running, .pill.queued { color: var(--accent); background: var(--accent-soft); border-color: rgba(134, 168, 255, .3); }
+    .pill.completed { color: var(--green); background: var(--green-soft); border-color: rgba(103, 214, 174, .3); }
+    .pill.failed, .pill.cancelled { color: var(--red); background: var(--red-soft); border-color: rgba(241, 139, 155, .3); }
+    .progress-track { height: 9px; margin: 19px 0 8px; overflow: hidden; background: #0d1526; border: 1px solid var(--line-soft); border-radius: 99px; }
+    .progress-bar { width: 0; height: 100%; background: var(--accent); border-radius: inherit; transition: width .25s ease; }
+    .progress-meta { display: flex; justify-content: space-between; gap: 12px; color: var(--faint); font-size: 12px; }
+    .job-meta { display: grid; gap: 7px; margin-top: 18px; padding-top: 15px; border-top: 1px solid var(--line-soft); color: var(--muted); font-size: 13px; }
+    .job-meta div { display: flex; justify-content: space-between; gap: 12px; }
+    .job-meta strong { color: var(--text); font-weight: 650; text-align: right; overflow-wrap: anywhere; }
+    .status-actions { display: flex; gap: 9px; margin-top: 18px; }
+
+    .metric-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; padding: 0 22px 22px; }
+    .metric { padding: 13px 14px; background: var(--panel-soft); border: 1px solid var(--line-soft); border-radius: 11px; }
+    .metric-label { color: var(--faint); font-size: 12px; }
+    .metric-value { margin-top: 2px; color: var(--text); font-size: 18px; font-weight: 750; font-variant-numeric: tabular-nums; }
+    .answer-panel { padding: 22px; }
+    .answer-header { display: flex; justify-content: space-between; gap: 14px; align-items: baseline; }
+    .answer-header h2 { margin: 0; font-size: 19px; letter-spacing: -.02em; }
+    .answer-header span { color: var(--faint); font-size: 12px; }
+    .answer-empty { margin: 19px 0 0; padding: 20px; color: var(--muted); background: var(--panel-soft); border: 1px dashed var(--line); border-radius: 12px; font-size: 14px; }
+    .action-list { display: grid; gap: 15px; margin-top: 20px; }
+    .action-line { display: grid; gap: 6px; }
+    .action-line-top { display: flex; justify-content: space-between; gap: 15px; font-size: 14px; }
+    .action-name { color: var(--text); font-weight: 700; }
+    .action-frequency { color: var(--accent); font-weight: 800; font-variant-numeric: tabular-nums; }
+    .action-track { height: 8px; overflow: hidden; background: #0d1526; border-radius: 99px; }
+    .action-fill { height: 100%; width: 0; background: var(--accent); border-radius: inherit; transition: width .35s ease; }
+    .action-regret { color: var(--faint); font-size: 12px; }
+    .raw-result { margin-top: 20px; border-top: 1px solid var(--line-soft); }
+    .raw-result summary { padding-bottom: 0; color: var(--muted); font-size: 13px; }
+    pre { max-height: 360px; overflow: auto; margin: 14px 0 0; padding: 14px; color: #cbd7f2; background: #0b1323; border: 1px solid var(--line-soft); border-radius: 10px; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+    .toast { position: fixed; right: 22px; bottom: 22px; z-index: 20; max-width: min(420px, calc(100% - 44px)); padding: 13px 15px; color: var(--text); background: #1d2a45; border: 1px solid #496496; border-radius: 11px; box-shadow: var(--shadow); opacity: 0; transform: translateY(12px); pointer-events: none; transition: opacity .18s ease, transform .18s ease; }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .toast.error { color: #ffe7eb; background: #3a202d; border-color: #875064; }
+    .muted { color: var(--muted); }
+    .hidden { display: none !important; }
+
+    /* Analytical workspace: dense, flat and data-led. */
+    .topbar { background: #202020; backdrop-filter: none; }
+    .brand-mark { border-radius: 3px; background: #303030; border-color: #585858; }
+    .panel, .analysis-workspace { box-shadow: none; border-radius: 4px; }
+    .button { border-radius: 3px; }
+    .button:hover:not(:disabled) { transform: none; }
+    .button.primary { color: #172013; background: var(--green); border-color: #c7f4af; }
+    .button.primary:hover:not(:disabled) { background: #c7f4af; }
+    .button.secondary { background: #363636; border-color: #5b5b5b; }
+    .button.secondary:hover:not(:disabled) { background: #414141; }
+    .button.ghost:hover:not(:disabled) { background: #303030; }
+    .pill { border-radius: 3px; }
+    .step { border-radius: 3px; background: #353535; color: #d8d8d8; }
+
+    .analysis-workspace { overflow: hidden; margin-bottom: 20px; background: #202020; border: 1px solid #414141; }
+    .analysis-head { display: flex; align-items: end; justify-content: space-between; gap: 18px; padding: 17px 18px 13px; border-bottom: 1px solid #3b3b3b; }
+    .analysis-kicker { color: #a8a8a8; font-size: 12px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+    .analysis-head h2 { margin: 3px 0 0; font-size: 24px; line-height: 1.1; letter-spacing: -.03em; }
+    .analysis-head p { margin: 5px 0 0; color: #a1a1a1; font-size: 13px; }
+    .analysis-tools { display: flex; align-items: center; gap: 8px; }
+    .decision-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 2px; padding: 8px; background: #181818; border-bottom: 1px solid #3b3b3b; }
+    .decision-node { min-height: 58px; padding: 8px 10px; background: #292929; border: 1px solid #3b3b3b; }
+    .decision-node.current { background: #303030; border-color: #a9a9a9; }
+    .decision-node .node-player { color: #8f8f8f; font-size: 11px; font-weight: 750; text-transform: uppercase; }
+    .decision-node .node-action { margin-top: 2px; color: #e9e9e9; font-size: 14px; font-weight: 750; }
+    .decision-node .node-detail { color: #9e9e9e; font-size: 11px; }
+    .analysis-grid { display: grid; grid-template-columns: minmax(0, 1fr) 332px; min-height: 560px; }
+    .matrix-panel { min-width: 0; padding: 0 15px 15px; border-right: 1px solid #3b3b3b; }
+    .analysis-tabs { display: flex; align-items: center; gap: 20px; height: 43px; border-bottom: 1px solid #383838; }
+    .analysis-tab { height: 43px; padding-top: 12px; color: #898989; font-size: 13px; }
+    .analysis-tab.active { color: #f0f0f0; border-bottom: 2px solid #cfcfcf; }
+    .matrix-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 13px 0 10px; }
+    .matrix-toolbar strong { display: inline-block; color: #efefef; font-size: 15px; }
+    .matrix-toolbar strong + span { margin-left: 10px; color: #858585; font-size: 12px; }
+    .matrix-legend { display: flex; flex-wrap: wrap; gap: 11px; color: #a0a0a0; font-size: 11px; }
+    .matrix-legend span { display: inline-flex; align-items: center; gap: 5px; }
+    .legend-swatch { display: inline-block; width: 10px; height: 10px; border: 1px solid rgba(255,255,255,.18); }
+    .legend-swatch.fold, .dominant-fold { background: var(--fold); }
+    .legend-swatch.call, .dominant-call { background: var(--call); }
+    .legend-swatch.covered { background: #666; }.legend-swatch.partial { background: #4b4b4b; }.legend-swatch.empty { background: #292929; }
+    .legend-swatch.raise, .dominant-raise { background: var(--raise); }
+    .legend-swatch.allin, .dominant-allin { background: var(--allin); }
+    .matrix-wrap { overflow: auto; padding-bottom: 2px; }
+    .matrix-axis.top { display: grid; grid-template-columns: repeat(13, minmax(45px, 1fr)); margin-left: 35px; min-width: 620px; }
+    .matrix-row { display: flex; min-width: 655px; }
+    .matrix-axis.side { display: grid; grid-template-rows: repeat(13, minmax(45px, 1fr)); width: 35px; flex: 0 0 35px; }
+    .matrix-axis div { display: grid; place-items: center; color: #a9a9a9; font-size: 12px; font-weight: 750; }
+    .hand-matrix { display: grid; grid-template-columns: repeat(13, minmax(45px, 1fr)); grid-template-rows: repeat(13, minmax(45px, 1fr)); min-width: 620px; border-top: 1px solid #191919; border-left: 1px solid #191919; }
+    .hand-cell { position: relative; display: flex; flex-direction: column; justify-content: space-between; min-height: 45px; padding: 5px 6px 4px; color: #f3f3f3; border-right: 1px solid #191919; border-bottom: 1px solid #191919; background: #303030; }
+    .hand-cell.dominant-fold { background: #3f7eb2; }
+    .hand-cell.dominant-call { background: #666; }
+    .hand-cell.dominant-raise { background: #d93e42; }
+    .hand-cell.dominant-allin { background: #812126; }
+    .hand-cell.unseen { color: #858585; background: #2b2b2b; }
+    .hand-cell.hero-class { outline: 2px solid #f0f0f0; outline-offset: -2px; z-index: 1; }
+    .cell-name { font-size: 12px; font-weight: 750; line-height: 1; }
+    .cell-frequency { align-self: end; font-size: 11px; font-variant-numeric: tabular-nums; }
+    .cell-bar { display: flex; height: 3px; margin: 2px -1px 0; overflow: hidden; background: rgba(0,0,0,.18); }
+    .cell-bar i { display: block; height: 100%; }
+    .cell-bar .fold { background: #8cb9dd; }.cell-bar .call { background: #bcbcbc; }.cell-bar .raise { background: #ffb0b0; }.cell-bar .allin { background: #e98b8e; }
+    .matrix-foot { display: flex; justify-content: space-between; gap: 12px; padding-top: 10px; color: #888; font-size: 11px; }
+    .analysis-rail { display: grid; align-content: start; background: #1c1c1c; }
+    .rail-block { padding: 14px; border-bottom: 1px solid #383838; }
+    .rail-heading { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 10px; color: #e6e6e6; font-size: 13px; font-weight: 750; }
+    .rail-heading span:last-child { color: #888; font-size: 11px; font-weight: 500; }
+    .table-block { padding-bottom: 16px; }
+    .table-diagram { position: relative; height: 195px; background: #202020; border: 1px solid #353535; }
+    .table-oval { position: absolute; top: 35px; right: 45px; bottom: 35px; left: 45px; border: 1px solid #575757; border-radius: 50%; }
+    .table-centre { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #bcbcbc; font-size: 12px; font-weight: 750; text-align: center; }
+    .seat-chip { position: absolute; display: grid; place-items: center; width: 43px; height: 30px; color: #d6d6d6; background: #303030; border: 1px solid #555; border-radius: 50%; font-size: 10px; line-height: 1.05; text-align: center; }
+    .seat-chip.hero { color: #202020; background: #cfcfcf; border-color: #f0f0f0; }
+    .seat-chip.s0 { top: 12px; left: 50%; transform: translateX(-50%); }.seat-chip.s1 { top: 43px; right: 15px; }.seat-chip.s2 { bottom: 42px; right: 15px; }.seat-chip.s3 { bottom: 10px; left: 50%; transform: translateX(-50%); }.seat-chip.s4 { bottom: 42px; left: 15px; }.seat-chip.s5 { top: 43px; left: 15px; }.seat-chip.s6 { top: 12px; left: 18%; }.seat-chip.s7 { top: 12px; right: 18%; }
+    .dealer-marker { position: absolute; top: 50%; right: 21%; color: #e8e8e8; font-size: 11px; font-weight: 800; }
+    .action-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px; }
+    .action-card { min-height: 94px; padding: 8px; color: #fff; }
+    .action-card.fold { background: var(--fold); }.action-card.call { background: var(--call); }.action-card.raise { background: var(--raise); }.action-card.allin { background: var(--allin); }
+    .action-card .card-name { font-size: 13px; font-weight: 750; }.action-card .card-value { margin-top: 14px; font-size: 22px; font-weight: 800; line-height: 1; }.action-card .card-meta { margin-top: 5px; color: rgba(255,255,255,.75); font-size: 10px; }
+    .action-stack { display: flex; height: 12px; margin-top: 8px; background: #303030; border: 1px solid #454545; }.action-stack i { display: block; height: 100%; }.action-stack .fold { background: var(--fold); }.action-stack .call { background: var(--call); }.action-stack .raise { background: var(--raise); }.action-stack .allin { background: var(--allin); }
+    .compact-meta { display: grid; gap: 8px; color: #999; font-size: 12px; }.compact-meta div { display: flex; justify-content: space-between; gap: 12px; }.compact-meta strong { color: #e5e5e5; font-weight: 650; }
+    .analysis-workspace .pill { background: #303030; }.analysis-workspace .pill.completed { color: #d3f5c2; background: #33462d; border-color: #5b8251; }
+    .analysis-progress { max-width: 190px; color: #8d8d8d; font-size: 11px; text-align: right; }
+    .workspace-grid { display: none; margin-top: 18px; }
+    body.setup-visible .workspace-grid { display: grid; }
+    body.setup-visible #analysisSetupButton { color: #1f261c; background: var(--green); border-color: #c7f4af; }
+    .analysis-empty { padding: 14px; color: #989898; background: #292929; border: 1px solid #3d3d3d; font-size: 12px; }
+    .preset-select { min-height: 36px; max-width: 178px; padding: 6px 28px 6px 10px; color: #cfcfcf; background: #292929; border: 1px solid #555; border-radius: 3px; font-size: 13px; }
+    .preset-select:focus { background: #292929; box-shadow: none; border-color: #aaa; }
+    .analysis-tabs button { border: 0; border-bottom: 2px solid transparent; background: transparent; cursor: pointer; }
+    .analysis-tabs button:hover { color: #dedede; }
+    .analysis-tabs button:focus-visible, .hand-cell:focus-visible, .rail-link:focus-visible { outline: 2px solid #f0f0f0; outline-offset: -2px; }
+    .decision-strip { display: flex; gap: 2px; overflow-x: auto; scrollbar-color: #555 #1b1b1b; }
+    .decision-node { flex: 0 0 132px; }
+    .decision-node + .decision-node { position: relative; }
+    .rail-link { padding: 0; color: #9a9a9a; background: transparent; border: 0; font-size: 11px; font-weight: 500; }
+    .rail-link:hover { color: #f0f0f0; }
+    .hand-cell { width: 100%; min-width: 0; font: inherit; text-align: left; cursor: pointer; }
+    .hand-cell:hover { filter: brightness(1.12); }
+    .hand-cell.selected { outline: 2px solid #fff; outline-offset: -3px; z-index: 2; }
+    .hand-cell.unseen:hover { background: #373737; }
+    .hand-cell.range-covered { color: #f0f0f0; background: #666; }
+    .hand-cell.range-partial { color: #d5d5d5; background: #4b4b4b; }
+    .hand-cell.range-empty { color: #777; background: #292929; }
+    .inspector-block { max-height: 348px; overflow: auto; }
+    .selection-summary { color: #a7a7a7; font-size: 12px; line-height: 1.45; }
+    .selection-summary strong { color: #f0f0f0; }
+    .combo-list { display: grid; gap: 4px; margin-top: 10px; }
+    .combo-row { display: grid; grid-template-columns: 72px minmax(0, 1fr) auto; align-items: center; gap: 7px; padding: 6px 7px; background: #242424; border: 1px solid #383838; }
+    .combo-cards { color: #f0f0f0; font: 12px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 750; }
+    .combo-visits { color: #8f8f8f; font-size: 10px; }
+    .combo-dominant { justify-self: end; padding: 2px 5px; color: #fff; font-size: 10px; font-weight: 750; }
+    .combo-dominant.fold { background: var(--fold); }.combo-dominant.call { background: var(--call); }.combo-dominant.raise { background: var(--raise); }.combo-dominant.allin { background: var(--allin); }.combo-dominant.none { color: #777; background: #333; }
+    .combo-actions { grid-column: 1 / -1; color: #9b9b9b; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .blocker-summary { margin-top: 10px; padding-top: 9px; color: #a6a6a6; border-top: 1px solid #383838; font-size: 11px; line-height: 1.45; }
+    .blocker-summary strong { color: #e2e2e2; }
+    .blocker-summary .blocked { color: #e97878; }.blocker-summary .available { color: #b7ef9c; }
+    .convergence-content { display: grid; gap: 9px; }
+    .diagnostic-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
+    .diagnostic-metric { padding: 7px 8px; background: #242424; border: 1px solid #383838; }
+    .diagnostic-metric span { display: block; color: #888; font-size: 10px; }.diagnostic-metric strong { display: block; margin-top: 2px; color: #ededed; font-size: 13px; font-variant-numeric: tabular-nums; }
+    .diagnostic-row { display: grid; gap: 4px; }.diagnostic-row-top { display: flex; justify-content: space-between; color: #999; font-size: 11px; }.diagnostic-track { height: 5px; background: #303030; }.diagnostic-track i { display: block; height: 100%; background: #a9a9a9; }.diagnostic-note { color: #777; font-size: 10px; line-height: 1.4; }
+    .ev-missing { color: #a0a0a0; font-size: 10px; }
+    .action-card .card-ev { margin-top: 8px; color: rgba(255,255,255,.82); font-size: 10px; font-variant-numeric: tabular-nums; }
+    .analysis-tab[data-analysis-tab="diagnostics"].active { border-color: #d5b36b; }
+    .analysis-grid.diagnostics-mode .matrix-panel { background: #1d1d1d; }
+    .analysis-grid.diagnostics-mode .hand-matrix { opacity: .2; }
+    .analysis-grid.diagnostics-mode .convergence-block { border-left: 2px solid #d5b36b; }
+
+    @media (max-width: 1080px) {
+      .analysis-grid { grid-template-columns: 1fr; }
+      .matrix-panel { border-right: 0; border-bottom: 1px solid #3b3b3b; }
+      .analysis-rail { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+      .analysis-rail .compact-meta { grid-column: span 2; }
+    }
+    @media (max-width: 720px) {
+      .analysis-head { display: block; }.analysis-tools { margin-top: 12px; justify-content: space-between; }
+      .analysis-rail { display: block; }.matrix-toolbar { display: block; }.matrix-legend { margin-top: 9px; }
+    }
+
+    @media (max-width: 1080px) {
+      .workspace-grid { grid-template-columns: 1fr; }
+      .results-column { position: static; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+      .answer-panel { grid-column: span 2; }
+    }
+    @media (max-width: 720px) {
+      .topbar { min-height: 68px; padding: 12px 18px; }
+      .server-state { font-size: 0; }
+      .server-state .state-dot { margin-right: 2px; }
+      .main { width: min(100% - 24px, 640px); padding-top: 28px; }
+      .hero { display: block; }
+      .hero-actions { justify-content: flex-start; margin-top: 22px; }
+      .panel-head, .panel-body, .status-panel, .answer-panel { padding-left: 17px; padding-right: 17px; }
+      .metric-grid { padding-left: 17px; padding-right: 17px; }
+      .field.span-3, .field.span-4, .field.span-5, .field.span-6, .field.span-8, .field.span-12 { grid-column: span 12; }
+      .history-row { grid-template-columns: 24px minmax(0, 1fr) 36px; }
+      .history-row .action-field, .history-row .target-field { grid-column: span 1; }
+      .history-row .target-field { grid-column: 2; }
+      .history-row .remove-row { grid-column: 3; grid-row: 1 / span 2; }
+      .street-grid { grid-template-columns: 1fr; }
+      .results-column { display: grid; grid-template-columns: 1fr; }
+      .answer-panel { grid-column: auto; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">H</div>
+        <div class="brand-copy">
+          <div class="brand-title">Hold'em Lab</div>
+          <div class="brand-subtitle">Native multiway solver workspace</div>
+        </div>
+      </div>
+      <div id="serverState" class="server-state"><span class="state-dot"></span><span id="serverStateText">Проверяем native server…</span></div>
+    </header>
+
+    <main class="main">
+      <section class="hero">
+        <div class="hero-copy">
+          <div class="eyebrow">Native solver workspace · ChipEV</div>
+          <h1>Spot analysis</h1>
+          <p>Главный экран — стратегия и матрица. Настройки открываются только когда они нужны.</p>
+        </div>
+        <div class="hero-actions">
+          <button id="importButton" class="button ghost small" type="button">Импорт JSON</button>
+          <button id="exportButton" class="button ghost small" type="button">Экспорт JSON</button>
+          <select id="presetSelect" class="preset-select" aria-label="Spot preset"><option value="">Presets</option></select>
+          <button id="savePresetButton" class="button ghost small" type="button">Сохранить preset</button>
+          <input id="jobFile" class="hidden" type="file" accept="application/json,.json">
+          <button id="validateButton" class="button secondary" type="button">Проверить spot</button>
+          <button id="solveButton" class="button primary" type="button">Запустить solve</button>
+        </div>
+      </section>
+
+      <section id="analysisWorkspace" class="analysis-workspace" aria-label="Solver analysis">
+        <div class="analysis-head">
+          <div class="analysis-context">
+            <div class="analysis-kicker">Strategy + frequencies</div>
+            <h2 id="analysisTitle">Hero strategy</h2>
+            <p id="analysisSubtitle">Exact combo coverage will appear after the solve.</p>
+          </div>
+          <div class="analysis-tools">
+            <span id="analysisStatus" class="pill">No result</span>
+            <span id="analysisProgress" class="analysis-progress">Настройте или импортируйте spot</span>
+            <button id="analysisCancelButton" class="button danger small hidden" type="button">Отменить</button>
+            <button id="analysisSetupButton" class="button ghost small" type="button">Настроить spot</button>
+          </div>
+        </div>
+        <div id="decisionStrip" class="decision-strip"></div>
+        <div class="analysis-grid">
+          <section class="matrix-panel">
+            <div class="analysis-tabs" role="tablist" aria-label="Analysis views"><button class="analysis-tab active" type="button" data-analysis-tab="strategy" role="tab" aria-selected="true">Стратегия</button><button class="analysis-tab" type="button" data-analysis-tab="range" role="tab" aria-selected="false">Диапазон</button><button class="analysis-tab" type="button" data-analysis-tab="diagnostics" role="tab" aria-selected="false">Диагностика</button></div>
+            <div class="matrix-toolbar"><div><strong>Hero combo matrix</strong><span id="matrixCaption">—</span></div><div id="matrixLegend" class="matrix-legend"><span><i class="legend-swatch fold"></i>Fold</span><span><i class="legend-swatch call"></i>Call</span><span><i class="legend-swatch raise"></i>Raise</span><span><i class="legend-swatch allin"></i>All-in</span></div></div>
+            <div class="matrix-wrap"><div class="matrix-axis top" id="matrixColumns"></div><div class="matrix-row"><div class="matrix-axis side" id="matrixRows"></div><div id="handMatrix" class="hand-matrix"></div></div></div>
+            <div class="matrix-foot"><span id="matrixFootnote">Цвет обозначает действие; число — частоту. Пустые ячейки не были запрошены в этом spot.</span><span id="matrixCoverage">—</span></div>
+          </section>
+          <aside class="analysis-rail">
+            <section class="rail-block table-block"><div class="rail-heading"><span>Table</span><span id="railStreet">preflop</span></div><div id="tableDiagram" class="table-diagram"></div></section>
+            <section class="rail-block"><div class="rail-heading"><span>Actions</span><span id="actionTotal">—</span></div><div id="actionCards" class="action-cards"></div><div id="actionStack" class="action-stack"></div><div id="actionEvNote" class="ev-missing">Per-action EV не экспортирован; positive regret не является EV.</div></section>
+            <section class="rail-block compact-meta"><div><span>Tree nodes</span><strong id="analysisTreeNodes">—</strong></div><div><span>Iterations</span><strong id="analysisIterations">—</strong></div><div><span>Observed weight</span><strong id="analysisObservedWeight">—</strong></div><div><span>Missing combos</span><strong id="analysisMissingHands">—</strong></div></section>
+            <section class="rail-block inspector-block"><div class="rail-heading"><span>Combo inspector</span><button id="clearSelectionButton" class="rail-link" type="button">Сбросить</button></div><div id="selectionSummary" class="selection-summary">Выберите ячейку matrix, чтобы увидеть exact combos и blockers.</div><div id="comboList" class="combo-list"></div><div id="blockerSummary" class="blocker-summary"></div></section>
+            <section id="convergenceBlock" class="rail-block convergence-block"><div class="rail-heading"><span>Convergence</span><span id="convergenceLabel">после solve</span></div><div id="convergenceContent" class="convergence-content"><div class="analysis-empty">Diagnostics появятся в result JSON. Positive regret — диагностический сигнал, не exploitability proof.</div></div></section>
+          </aside>
+        </div>
+      </section>
+
+      <div class="workspace-grid">
+        <form id="spotForm" class="stack" novalidate>
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2 class="panel-title"><span class="step">01</span>Игра и hero</h2>
+                <p class="panel-description">Базовые параметры стола и комбинация, для которой нужен ответ.</p>
+              </div>
+            </div>
+            <div class="panel-body">
+              <div class="field-grid">
+                <div class="field span-3"><label for="tableSize">Игроков</label><select id="tableSize"><option value="8" selected>8-max</option><option value="6">6-max</option><option value="5">5-max</option><option value="4">4-max</option><option value="3">3-max</option></select></div>
+                <div class="field span-3"><label for="buttonSeat">Button seat</label><input id="buttonSeat" type="number" min="0" value="0"><span class="hint">Нумерация от 0</span></div>
+                <div class="field span-3"><label for="smallBlind">Small blind</label><input id="smallBlind" type="number" min="1" value="100"></div>
+                <div class="field span-3"><label for="bigBlind">Big blind</label><input id="bigBlind" type="number" min="1" value="200"></div>
+                <div class="field span-6"><label for="stacks">Stacks</label><input id="stacks" value="16000" placeholder="16000 или 16000, 12000, …"><span class="hint">Одно число применится ко всем игрокам.</span></div>
+                <div class="field span-3"><label for="ante">Ante</label><input id="ante" type="number" min="0" value="0"></div>
+                <div class="field span-3"><label for="anteMode">Ante mode</label><select id="anteMode"><option value="none" selected>None</option><option value="uniform">Uniform</option><option value="big_blind">Big blind</option></select></div>
+                <div class="field span-3"><label for="heroSeat">Hero seat</label><input id="heroSeat" type="number" min="0" value="1"></div>
+                <div class="field span-3"><label for="heroHand">Hero hand/class</label><input id="heroHand" value="AJo" spellcheck="false"></div>
+                <div class="field span-6"><label for="heroLabel">Label в результате</label><input id="heroLabel" value="SB AJo"></div>
+                <div class="field span-6"><label for="deadCards">Known blockers / dead cards</label><input id="deadCards" value="" placeholder="As Kd"><span class="hint">Карты, уже известные solver; например board или folded dead cards.</span></div>
+                <div class="field span-6"><label for="jobId">Job id</label><input id="jobId" value="spot-ajo-demo" spellcheck="false"><span class="hint">Латиница, цифры, дефис, underscore или точка.</span></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2 class="panel-title"><span class="step">02</span>История действий</h2>
+                <p class="panel-description">Укажите только уже произошедшие действия. Последний actor должен быть hero.</p>
+              </div>
+              <span class="pill">preflop</span>
+            </div>
+            <div class="panel-body">
+              <p class="panel-note"><strong>Важно:</strong> ranges ниже задаются уже для continuation spot. Solver не угадывает ranges автоматически из history.</p>
+              <div id="historyRows" class="history-list"></div>
+              <div class="history-actions"><button id="addHistoryButton" class="button ghost small" type="button">+ Добавить действие</button><span class="hint">Raise/bet требуют target.</span></div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2 class="panel-title"><span class="step">03</span>Continuation ranges</h2>
+                <p class="panel-description">Один range на каждое seat. Можно использовать классы вроде <code>AA-TT, AKs-ATs</code>.</p>
+              </div>
+            </div>
+            <div class="panel-body"><div id="rangeRows" class="range-grid"></div></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2 class="panel-title"><span class="step">04</span>Дерево и runout</h2>
+                <p class="panel-description">Начните с небольшой abstraction. Более широкое дерево потребует существенно больше памяти и времени.</p>
+              </div>
+            </div>
+            <div class="panel-body">
+              <div class="field-grid">
+                <div class="field span-4"><label for="preflopRaise">Preflop raise targets</label><input id="preflopRaise" value="1600" placeholder="1600, 2400"></div>
+                <div class="field span-4"><label for="maxNodes">Max tree nodes</label><input id="maxNodes" type="number" min="100" value="100000"></div>
+                <div class="field span-4"><label for="maxDepth">Max tree depth</label><input id="maxDepth" type="number" min="1" value="64"></div>
+              </div>
+              <details>
+                <summary>Postflop action abstraction</summary>
+                <div class="details-content">
+                  <div class="street-grid">
+                    <div class="street-card"><h3>Flop</h3><div class="field"><label for="flopBet">Bet fractions</label><input id="flopBet" placeholder="0.33, 0.66"></div><div class="field"><label for="flopRaise">Raise multipliers</label><input id="flopRaise" placeholder="2"></div><label class="checkline"><input id="flopAllIn" type="checkbox"> Include all-in</label></div>
+                    <div class="street-card"><h3>Turn</h3><div class="field"><label for="turnBet">Bet fractions</label><input id="turnBet" placeholder="0.5, 1"></div><div class="field"><label for="turnRaise">Raise multipliers</label><input id="turnRaise" placeholder="2"></div><label class="checkline"><input id="turnAllIn" type="checkbox"> Include all-in</label></div>
+                    <div class="street-card"><h3>River</h3><div class="field"><label for="riverBet">Bet fractions</label><input id="riverBet" placeholder="0.5, 1"></div><div class="field"><label for="riverRaise">Raise multipliers</label><input id="riverRaise" placeholder="2"></div><label class="checkline"><input id="riverAllIn" type="checkbox"> Include all-in</label></div>
+                  </div>
+                </div>
+              </details>
+              <details>
+                <summary>Public runout policy</summary>
+                <div class="details-content">
+                  <div class="field-grid">
+                    <div class="field span-4"><label for="flopCards">Flop outcomes</label><textarea id="flopCards" rows="2" placeholder="2s 7d 9c | 1.0">2s 7d 9c | 1.0</textarea></div>
+                    <div class="field span-4"><label for="turnCard">Turn outcomes</label><textarea id="turnCard" rows="2" placeholder="5h | 1.0">5h | 1.0</textarea></div>
+                    <div class="field span-4"><label for="riverCard">River outcomes</label><textarea id="riverCard" rows="2" placeholder="3h | 1.0">3h | 1.0</textarea></div>
+                    <div class="field span-6"><label class="checkline"><input id="enumerateExact" type="checkbox"> Enumerate exact public runouts</label></div>
+                    <div class="field span-6"><label for="maxOutcomes">Max outcomes per chance node</label><input id="maxOutcomes" type="number" min="1" value="10000"></div>
+                  </div>
+                  <p class="hint">Одна строка: <code>cards | probability</code>. Несколько строк задают weighted outcomes. Exact enumeration — тяжёлый режим и требует строгого лимита.</p>
+                </div>
+              </details>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2 class="panel-title"><span class="step">05</span>Execution</h2>
+                <p class="panel-description">Количество итераций — общий target. Job можно продолжить позже.</p>
+              </div>
+            </div>
+            <div class="panel-body">
+              <div class="field-grid">
+                <div class="field span-3"><label for="iterations">Target iterations</label><input id="iterations" type="number" min="1" value="1000"></div>
+                <div class="field span-3"><label for="utilitySamples">Utility samples</label><input id="utilitySamples" type="number" min="1" value="32"></div>
+                <div class="field span-3"><label for="checkpointInterval">Checkpoint every</label><input id="checkpointInterval" type="number" min="1" value="100"></div>
+                <div class="field span-3"><label for="keepCheckpoints">Keep checkpoints</label><input id="keepCheckpoints" type="number" min="1" value="5"></div>
+                <div class="field span-4"><label for="workerCount">Worker count</label><input id="workerCount" type="number" min="1" value="2"></div>
+                <div class="field span-4"><label for="reductionBatch">Reduction batch</label><input id="reductionBatch" type="number" min="1" value="2"></div>
+                <div class="field span-4"><label for="seed">Seed</label><input id="seed" type="number" min="0" value="20260910"></div>
+              </div>
+            </div>
+          </section>
+        </form>
+
+        <aside class="results-column">
+          <section class="panel status-panel">
+            <div class="status-top"><div><div class="status-label">Solver status</div><div id="jobStatus" class="status-value">Готов к проверке</div></div><span id="statusPill" class="pill">idle</span></div>
+            <div class="progress-track"><div id="progressBar" class="progress-bar"></div></div>
+            <div class="progress-meta"><span id="progressText">Нет активной job</span><span id="progressPercent">0%</span></div>
+            <div id="jobMeta" class="job-meta"><div><span>Job</span><strong>—</strong></div><div><span>Checkpoint</span><strong>—</strong></div></div>
+            <div class="status-actions"><button id="cancelButton" class="button danger small hidden" type="button">Отменить job</button><button id="resetButton" class="button ghost small" type="button">Сбросить ответ</button></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head"><div><h2 class="panel-title">Проверка входа</h2><p class="panel-description">До solve здесь появятся structural metrics.</p></div></div>
+            <div id="metrics" class="metric-grid"><div class="metric"><div class="metric-label">Tree nodes</div><div class="metric-value">—</div></div><div class="metric"><div class="metric-label">Hero combos</div><div class="metric-value">—</div></div><div class="metric"><div class="metric-label">Actor</div><div class="metric-value">—</div></div><div class="metric"><div class="metric-label">Fingerprint</div><div class="metric-value">—</div></div></div>
+          </section>
+
+          <section id="answerPanel" class="panel answer-panel">
+            <div class="answer-header"><h2>Hero answer</h2><span id="answerSubhead">Пока нет результата</span></div>
+            <div id="answerEmpty" class="answer-empty">После завершения solve здесь будут action frequencies по hero hand. Это не «магическое решение», а оценка на текущем числе iterations и sampling coverage.</div>
+            <div id="answerContent" class="hidden"><div id="actionList" class="action-list"></div><div id="coverageLine" class="panel-note" style="margin-top:20px"></div><details class="raw-result"><summary>Показать raw JSON result</summary><pre id="rawResult"></pre></details></div>
+          </section>
+        </aside>
+      </div>
+    </main>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </div>
+
+  <script>
+    (() => {
+      const $ = (id) => document.getElementById(id);
+      const state = { jobId: null, pollTimer: null, busy: false, currentJob: null, currentResult: null, selectedClass: null, analysisTab: 'strategy' };
+      const defaultRanges = [
+        'AA-TT, AKs-ATs, KQs-KTs, QJs', 'AJo',
+        'AA-TT, AKs-ATs, KQs-KTs, QJs', 'AA-TT, AKs-ATs, KQs-KTs, QJs',
+        'AA-TT, AKs-ATs, KQs-KTs, QJs', 'AA-TT, AKs-ATs, KQs-KTs, QJs',
+        'AA-TT, AKs-ATs, KQs-KTs, QJs', 'AA-TT, AKs-ATs, KQs-KTs, QJs'
+      ];
+      const defaultHistory = [
+        { player: 3, kind: 'fold' }, { player: 4, kind: 'fold' },
+        { player: 5, kind: 'raise', to: 500 }, { player: 6, kind: 'fold' },
+        { player: 7, kind: 'fold' }, { player: 0, kind: 'call' }
+      ];
+
+      function number(id, fallback = 0) {
+        const value = Number($(id).value);
+        return Number.isFinite(value) ? value : fallback;
+      }
+      function numberList(id, integer = false) {
+        const raw = $(id).value.trim();
+        if (!raw) return [];
+        return raw.split(/[\s,]+/).filter(Boolean).map((value) => {
+          const parsed = integer ? Number.parseInt(value, 10) : Number.parseFloat(value);
+          if (!Number.isFinite(parsed)) throw new Error(`Некорректное число в поле ${id}: ${value}`);
+          return parsed;
+        });
+      }
+      function text(id) { return $(id).value.trim(); }
+      function seatOptions(selected) {
+        const size = number('tableSize', 8);
+        return Array.from({ length: size }, (_, index) => `<option value="${index}" ${index === selected ? 'selected' : ''}>Seat ${index}</option>`).join('');
+      }
+      function actionOptions(selected) {
+        return ['fold', 'check', 'call', 'bet', 'raise', 'all_in'].map((kind) => `<option value="${kind}" ${kind === selected ? 'selected' : ''}>${actionLabel(kind)}</option>`).join('');
+      }
+      function actionLabel(kind, to) {
+        const labels = { fold: 'Fold', check: 'Check', call: 'Call', bet: 'Bet', raise: 'Raise', all_in: 'All-in' };
+        return `${labels[kind] || kind}${to !== undefined ? ` to ${to}` : ''}`;
+      }
+      function addHistoryRow(data = { player: 0, kind: 'fold' }) {
+        const row = document.createElement('div');
+        row.className = 'history-row';
+        row.innerHTML = `<span class="row-number"></span><select class="player-field" aria-label="Player"></select><select class="action-field" aria-label="Action"></select><div class="target-field"><input class="target-input" type="number" min="1" placeholder="Target"></div><button class="remove-row" type="button" aria-label="Удалить действие">×</button>`;
+        row.querySelector('.player-field').innerHTML = seatOptions(data.player);
+        row.querySelector('.action-field').innerHTML = actionOptions(data.kind);
+        row.querySelector('.target-input').value = data.to ?? '';
+        $('historyRows').appendChild(row);
+        updateHistoryRow(row);
+        renumberHistory();
+      }
+      function updateHistoryRow(row) {
+        const kind = row.querySelector('.action-field').value;
+        const target = row.querySelector('.target-field');
+        const needsTarget = kind === 'bet' || kind === 'raise';
+        target.classList.toggle('is-hidden', !needsTarget);
+        row.querySelector('.target-input').disabled = !needsTarget;
+      }
+      function renumberHistory() {
+        [...$('historyRows').children].forEach((row, index) => { row.querySelector('.row-number').textContent = String(index + 1).padStart(2, '0'); });
+      }
+      function syncSeatControls() {
+        const size = number('tableSize', 8);
+        const max = Math.max(0, size - 1);
+        ['buttonSeat', 'heroSeat'].forEach((id) => { $(id).max = String(max); if (number(id, 0) > max) $(id).value = String(max); });
+        [...document.querySelectorAll('.player-field')].forEach((select) => {
+          const current = Math.min(Number(select.value), max);
+          select.innerHTML = seatOptions(current);
+        });
+      }
+      function renderRanges() {
+        const size = number('tableSize', 8);
+        const hero = number('heroSeat', 1);
+        const old = [...document.querySelectorAll('.range-input')].map((input) => input.value);
+        $('rangeRows').innerHTML = '';
+        for (let index = 0; index < size; index += 1) {
+          const value = old[index] || defaultRanges[index] || 'AA-TT, AKs-ATs, KQs-KTs, QJs';
+          const row = document.createElement('div');
+          row.className = 'range-row';
+          row.innerHTML = `<div class="range-seat">Seat ${index}${index === hero ? '<span>hero</span>' : ''}</div><input class="range-input" data-seat="${index}" value="${escapeAttribute(value)}" spellcheck="false" aria-label="Range seat ${index}">`;
+          $('rangeRows').appendChild(row);
+        }
+      }
+      function escapeAttribute(value) { return String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+      function street(prefix) {
+        return {
+          explicit_bet_to: [],
+          bet_fractions: numberList(`${prefix}Bet`),
+          explicit_raise_to: [],
+          raise_multipliers: numberList(`${prefix}Raise`),
+          include_all_in: $(`${prefix}AllIn`).checked
+        };
+      }
+      function chance(id) {
+        const raw = text(id);
+        if (!raw) return [];
+        return raw.split(/\n+/).map((line) => line.trim()).filter(Boolean).map((line) => {
+          const parts = line.split('|'); const cards = parts[0].trim(); const probability = parts[1] === undefined || !parts[1].trim() ? 1.0 : Number(parts[1].trim());
+          if (!cards || !Number.isFinite(probability) || probability <= 0) throw new Error(`Некорректный chance outcome в поле ${id}.`);
+          return { cards, probability };
+        });
+      }
+      function makeJob() {
+        const tableSize = number('tableSize', 8);
+        const stackValues = numberList('stacks', true);
+        if (!stackValues.length) throw new Error('Укажите хотя бы один stack.');
+        const stacks = stackValues.length === 1 ? Array(tableSize).fill(stackValues[0]) : stackValues;
+        if (stacks.length !== tableSize) throw new Error(`Нужно указать 1 или ${tableSize} stack values.`);
+        const heroSeat = number('heroSeat', 1);
+        const history = [...document.querySelectorAll('.history-row')].map((row) => {
+          const kind = row.querySelector('.action-field').value;
+          const entry = { player: Number(row.querySelector('.player-field').value), kind };
+          if (kind === 'bet' || kind === 'raise') {
+            const target = Number(row.querySelector('.target-input').value);
+            if (!Number.isFinite(target) || target <= 0) throw new Error('Для bet/raise укажите положительный target.');
+            entry.to = target;
+          }
+          return entry;
+        });
+        const ranges = [...document.querySelectorAll('.range-input')].map((input) => ({ range: input.value.trim() }));
+        if (ranges.some((entry) => !entry.range)) throw new Error('Range не может быть пустым.');
+        const job = {
+          schema_version: 1,
+          table: {
+            table_size: tableSize,
+            button: number('buttonSeat', 0),
+            small_blind: number('smallBlind', 100),
+            big_blind: number('bigBlind', 200),
+            ante: number('ante', 0),
+            ante_mode: $('anteMode').value,
+            stacks,
+            dead_money: 0
+          },
+          dead_cards: text('deadCards'),
+          history,
+          ranges,
+          hero: { player: heroSeat, hand: text('heroHand'), label: text('heroLabel') || null },
+          tree: {
+            mode: 'full', max_nodes: number('maxNodes', 100000), max_depth: number('maxDepth', 64),
+            preflop: { explicit_bet_to: [], bet_fractions: [], explicit_raise_to: numberList('preflopRaise', true), raise_multipliers: [], include_all_in: false },
+            flop: street('flop'), turn: street('turn'), river: street('river'),
+            chance: { flop: chance('flopCards'), turn: chance('turnCard'), river: chance('riverCard'), enumerate_exact: $('enumerateExact').checked, max_outcomes_per_node: number('maxOutcomes', 10000) },
+            postflop_order: []
+          },
+          execution: {
+            seed: number('seed', 20260910), target_iterations: number('iterations', 1000),
+            checkpoint_interval: number('checkpointInterval', 100), keep_checkpoints: number('keepCheckpoints', 5),
+            max_private_attempts: 10000, worker_count: number('workerCount', 2),
+            reduction_batch_size: number('reductionBatch', 2), config_fingerprint: 0
+          }
+        };
+        if (!job.hero.hand) throw new Error('Укажите hero hand/class, например AJo.');
+        return job;
+      }
+      function setField(id, value) { if ($(id) && value !== undefined && value !== null) $(id).value = String(value); }
+      function setList(id, values) { setField(id, (values || []).join(', ')); }
+      function fillStreet(prefix, config = {}) {
+        setList(`${prefix}Bet`, config.bet_fractions);
+        setList(`${prefix}Raise`, config.raise_multipliers);
+        if ($(`${prefix}AllIn`)) $(`${prefix}AllIn`).checked = Boolean(config.include_all_in);
+      }
+      function populateJob(job) {
+        if (!job || job.schema_version !== 1 || !job.table || !job.hero || !job.tree) throw new Error('Это не MultiwayHoldemSpotJob schema version 1.');
+        const tableSize = Number(job.table.table_size || 8); $('tableSize').value = String(tableSize);
+        setField('buttonSeat', job.table.button); setField('smallBlind', job.table.small_blind); setField('bigBlind', job.table.big_blind); setList('stacks', job.table.stacks); setField('ante', job.table.ante); setField('anteMode', job.table.ante_mode || 'none');
+        setField('deadCards', job.dead_cards || '');
+        setField('heroSeat', job.hero.player); setField('heroHand', job.hero.hand); setField('heroLabel', job.hero.label || '');
+        syncSeatControls();
+        $('historyRows').innerHTML = ''; (job.history || []).forEach((entry) => addHistoryRow({ player: entry.player, kind: entry.kind, to: entry.to }));
+        renderRanges(); (job.ranges || []).forEach((entry, index) => { const input = document.querySelector(`.range-input[data-seat="${index}"]`); if (input) input.value = entry.range || ''; });
+        const tree = job.tree; setList('preflopRaise', tree.preflop?.explicit_raise_to); setField('maxNodes', tree.max_nodes); setField('maxDepth', tree.max_depth); fillStreet('flop', tree.flop); fillStreet('turn', tree.turn); fillStreet('river', tree.river);
+        const formatChance = (outcomes) => (outcomes || []).map((outcome) => `${outcome.cards} | ${outcome.probability}`).join('\n');
+        setField('flopCards', formatChance(tree.chance?.flop)); setField('turnCard', formatChance(tree.chance?.turn)); setField('riverCard', formatChance(tree.chance?.river));
+        if ($('enumerateExact')) $('enumerateExact').checked = Boolean(tree.chance?.enumerate_exact); setField('maxOutcomes', tree.chance?.max_outcomes_per_node || 10000);
+        const execution = job.execution || {}; setField('seed', execution.seed); setField('iterations', execution.target_iterations || 1000); setField('checkpointInterval', execution.checkpoint_interval || 100); setField('keepCheckpoints', execution.keep_checkpoints || 5); setField('workerCount', execution.worker_count || 1); setField('reductionBatch', execution.reduction_batch_size || 1);
+        resetAnswer(); state.currentJob = job; setSetupVisible(true); notify('JSON job загружен в форму.');
+      }
+      async function api(path, options = {}) {
+        const response = await fetch(path, { ...options, headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } });
+        let payload;
+        try { payload = await response.json(); } catch (_) { throw new Error(`Server вернул HTTP ${response.status} без JSON.`); }
+        if (!response.ok || payload.ok === false) throw new Error(payload.error?.message || `HTTP ${response.status}`);
+        return payload;
+      }
+      function setBusy(value) {
+        state.busy = value;
+        $('validateButton').disabled = value;
+        $('solveButton').disabled = value;
+      }
+      function notify(message, error = false) {
+        const toast = $('toast'); toast.textContent = message; toast.className = `toast show${error ? ' error' : ''}`;
+        window.clearTimeout(notify.timer); notify.timer = window.setTimeout(() => { toast.className = 'toast'; }, 4200);
+      }
+      function setStatus(label, pill, mode = '') {
+        $('jobStatus').textContent = label;
+        $('statusPill').textContent = pill;
+        $('statusPill').className = `pill ${mode}`;
+      }
+      function renderMetrics(data) {
+        const values = [data.tree_nodes ?? '—', data.hero_hands ?? '—', data.actor_after_history === null ? '—' : `Seat ${data.actor_after_history ?? '—'}`, data.tree_fingerprint ?? '—'];
+        const labels = ['Tree nodes', 'Hero combos', 'Actor after history', 'Tree fingerprint'];
+        $('metrics').innerHTML = values.map((value, index) => `<div class="metric"><div class="metric-label">${labels[index]}</div><div class="metric-value">${value}</div></div>`).join('');
+      }
+      function renderQueued(data) {
+        state.currentResult = null; state.selectedClass = null; renderEmptyAnalysis();
+        state.jobId = data.job_id;
+        setSetupVisible(false);
+        $('analysisWorkspace').classList.remove('hidden'); $('answerPanel').classList.remove('hidden');
+        $('analysisStatus').textContent = 'Queued'; $('analysisStatus').className = 'pill queued'; $('analysisProgress').textContent = 'Ожидает native worker'; $('analysisCancelButton').classList.remove('hidden');
+        setStatus('Job поставлена в очередь', 'Queued', 'queued');
+        $('progressBar').style.width = '0%'; $('progressText').textContent = 'Ожидает native worker'; $('progressPercent').textContent = '0%';
+        $('jobMeta').innerHTML = `<div><span>Job</span><strong>${data.job_id}</strong></div><div><span>Checkpoint</span><strong>—</strong></div>`;
+        $('cancelButton').classList.remove('hidden');
+      }
+      function renderManifest(manifest) {
+        const status = manifest.status || 'Running';
+        const target = manifest.config?.target_iterations || 0;
+        const completed = manifest.completed_iterations || 0;
+        const percent = target ? Math.min(100, Math.round(completed * 100 / target)) : 0;
+        const mode = status.toLowerCase();
+        setStatus(status === 'Running' ? 'Solver работает' : status, status, mode);
+        $('analysisStatus').textContent = status; $('analysisStatus').className = `pill ${mode}`;
+        $('analysisProgress').textContent = `${completed.toLocaleString('ru-RU')} / ${target.toLocaleString('ru-RU')} iterations`;
+        $('analysisCancelButton').classList.toggle('hidden', status !== 'Running');
+        $('progressBar').style.width = `${percent}%`;
+        $('progressText').textContent = `${completed.toLocaleString('ru-RU')} / ${target.toLocaleString('ru-RU')} iterations`;
+        $('progressPercent').textContent = `${percent}%`;
+        $('jobMeta').innerHTML = `<div><span>Job</span><strong>${manifest.job_id}</strong></div><div><span>Checkpoint</span><strong>${manifest.latest_checkpoint || '—'}</strong></div>`;
+        if (status === 'Running') $('cancelButton').classList.remove('hidden'); else $('cancelButton').classList.add('hidden');
+      }
+      function actionText(item) { return actionLabel(item.action?.kind, item.action?.to); }
+      const matrixRanks = ['A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', '2'];
+      const matrixSuits = ['s', 'h', 'd', 'c'];
+      function cardName(code) {
+        const card = Number(code);
+        return `${'23456789TJQKA'[Math.floor(card / 4)] || '?'}${matrixSuits[card % 4] || '?'}`;
+      }
+      function classFromCards(cards) {
+        if (!cards || cards.length < 2) return null;
+        const first = cardName(cards[0]); const second = cardName(cards[1]);
+        const r1 = first[0]; const r2 = second[0];
+        if (r1 === r2) return `${r1}${r2}`;
+        const i1 = matrixRanks.indexOf(r1); const i2 = matrixRanks.indexOf(r2);
+        const high = i1 < i2 ? r1 : r2; const low = i1 < i2 ? r2 : r1;
+        return `${high}${low}${first[1] === second[1] ? 's' : 'o'}`;
+      }
+      function matrixClass(row, column) {
+        if (row === column) return `${matrixRanks[row]}${matrixRanks[column]}`;
+        const high = row < column ? matrixRanks[row] : matrixRanks[column];
+        const low = row < column ? matrixRanks[column] : matrixRanks[row];
+        return `${high}${low}${row < column ? 's' : 'o'}`;
+      }
+      function dominantAction(actions) {
+        if (!actions?.length) return 'unseen';
+        const item = [...actions].sort((left, right) => Number(right.frequency || 0) - Number(left.frequency || 0))[0];
+        return ({ fold: 'dominant-fold', check: 'dominant-call', call: 'dominant-call', bet: 'dominant-raise', raise: 'dominant-raise', all_in: 'dominant-allin' })[item.action?.kind] || 'unseen';
+      }
+      function actionKindClass(kind) { return kind === 'all_in' ? 'allin' : ((kind === 'bet' || kind === 'raise') ? 'raise' : (kind === 'check' ? 'call' : kind)); }
+      function escapeHtml(value) { return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+      function actionBar(actions) {
+        return (actions || []).map((item) => `<i class="${actionKindClass(item.action?.kind)}" style="width:${Math.max(0, Math.min(100, Number(item.frequency || 0) * 100))}%"></i>`).join('');
+      }
+      function averageClassActions(result) {
+        const hero = result.hero || {};
+        const infosets = (result.strategy_report?.infosets || []).filter((info) => info.player === hero.player && info.public_node === (hero.public_node ?? 0));
+        const source = infosets.length ? infosets : (hero.observed_hands || []);
+        const buckets = new Map();
+        source.forEach((hand) => {
+          const name = classFromCards(hand.private_cards); if (!name) return;
+          const weight = Math.max(1, Number(hand.visits || 1));
+          const bucket = buckets.get(name) || { weight: 0, actions: new Map() }; bucket.weight += weight;
+          (hand.actions || []).forEach((item) => { const kind = item.action?.kind; if (!kind) return; const current = bucket.actions.get(kind) || { frequency: 0, regret: 0, to: item.action?.to }; current.frequency += weight * Number(item.frequency || 0); current.regret += weight * Number(item.positive_regret || 0); bucket.actions.set(kind, current); });
+          buckets.set(name, bucket);
+        });
+        const aggregated = new Map();
+        buckets.forEach((bucket, name) => {
+          const actions = [...bucket.actions.entries()].map(([kind, value]) => ({ action: { kind, ...(value.to === undefined ? {} : { to: value.to }) }, frequency: value.frequency / bucket.weight, positive_regret: value.regret / bucket.weight }));
+          aggregated.set(name, actions);
+        });
+        return aggregated;
+      }
+      function cardToken(code) {
+        const value = Number(code);
+        if (!Number.isInteger(value) || value < 0 || value >= 52) return '??';
+        return `${'23456789TJQKA'[Math.floor(value / 4)]}${['s', 'h', 'd', 'c'][value % 4]}`;
+      }
+      function comboKey(cards) { return (cards || []).slice().sort((left, right) => left - right).join(':'); }
+      function parseKnownCards(raw) {
+        const rankChars = '23456789TJQKA';
+        const suitChars = 'shdc';
+        return String(raw || '').split(/\s+/).filter(Boolean).map((token) => {
+          if (token.length !== 2) return null;
+          const rank = rankChars.indexOf(token[0].toUpperCase()); const suit = suitChars.indexOf(token[1].toLowerCase());
+          return rank >= 0 && suit >= 0 ? rank * 4 + suit : null;
+        }).filter((value) => value !== null);
+      }
+      function combosForClass(name) {
+        const match = String(name || '').match(/^([2-9TJQKA])([2-9TJQKA])([so])?$/i);
+        if (!match) return [];
+        const rankChars = '23456789TJQKA'; const first = rankChars.indexOf(match[1].toUpperCase()); const second = rankChars.indexOf(match[2].toUpperCase());
+        if (first < 0 || second < 0) return [];
+        if (first === second) {
+          const result = [];
+          for (let left = 0; left < 4; left += 1) for (let right = left + 1; right < 4; right += 1) result.push([first * 4 + left, second * 4 + right]);
+          return result;
+        }
+        const high = Math.max(first, second); const low = Math.min(first, second); const result = [];
+        if (match[3]?.toLowerCase() === 's') for (let suit = 0; suit < 4; suit += 1) result.push([high * 4 + suit, low * 4 + suit]);
+        else for (let highSuit = 0; highSuit < 4; highSuit += 1) for (let lowSuit = 0; lowSuit < 4; lowSuit += 1) if (highSuit !== lowSuit) result.push([high * 4 + highSuit, low * 4 + lowSuit]);
+        return result;
+      }
+      function formatCards(cards) { return (cards || []).map(cardToken).join(' '); }
+      function formatNumber(value, digits = 2) { return Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : '—'; }
+      function actionEv(item) {
+        const candidates = [item?.ev, item?.expected_value, item?.expected_utility, item?.utility, item?.action_ev];
+        const value = candidates.find((candidate) => candidate !== null && candidate !== undefined && candidate !== '' && Number.isFinite(Number(candidate)));
+        return value === undefined ? null : Number(value);
+      }
+      function actionEvLabel(item) {
+        const value = actionEv(item);
+        return value === null ? 'EV — not exported' : `EV ${formatNumber(value, 3)}`;
+      }
+      function classInfosets(result, className) {
+        const hero = result?.hero || {};
+        return (result?.strategy_report?.infosets || []).filter((info) => info.player === hero.player && info.public_node === (hero.public_node ?? 0) && classFromCards(info.private_cards) === className);
+      }
+      function observedHeroHands(result, className) {
+        return (result?.hero?.observed_hands || []).filter((hand) => classFromCards(hand.private_cards) === className);
+      }
+      function classCoverageMap(result) {
+        const hero = result?.hero || {}; const counts = new Map(); const seen = new Set();
+        (result?.strategy_report?.infosets || []).forEach((info) => {
+          if (info.player !== hero.player || info.public_node !== (hero.public_node ?? 0)) return;
+          const name = classFromCards(info.private_cards); if (!name) return; const key = `${name}:${comboKey(info.private_cards)}`;
+          if (!seen.has(key)) { seen.add(key); counts.set(name, (counts.get(name) || 0) + 1); }
+        });
+        (hero.observed_hands || []).forEach((hand) => { const name = classFromCards(hand.private_cards); if (!name) return; const key = `${name}:${comboKey(hand.private_cards)}`; if (!seen.has(key)) { seen.add(key); counts.set(name, (counts.get(name) || 0) + 1); } });
+        return counts;
+      }
+      function selectedClassActions(result, className) {
+        const infosets = classInfosets(result, className); const hands = infosets.length ? infosets : observedHeroHands(result, className);
+        if (!hands.length) return null;
+        const bucket = new Map(); let totalWeight = 0;
+        hands.forEach((hand) => {
+          const weight = Math.max(1, Number(hand.visits || 1)); totalWeight += weight;
+          (hand.actions || []).forEach((item) => { const key = JSON.stringify(item.action || {}); const current = bucket.get(key) || { ...item, frequency: 0, positive_regret: 0 }; current.frequency += weight * Number(item.frequency || 0); current.positive_regret += weight * Number(item.positive_regret || 0); bucket.set(key, current); });
+        });
+        return [...bucket.values()].map((item) => ({ ...item, frequency: item.frequency / totalWeight, positive_regret: item.positive_regret / totalWeight }));
+      }
+      function renderSelectionInspector(className) {
+        if (!className || !state.currentResult) {
+          $('selectionSummary').innerHTML = 'Выберите ячейку matrix после solve, чтобы увидеть exact combos и blockers.';
+          $('comboList').innerHTML = '';
+          $('blockerSummary').innerHTML = '';
+          return;
+        }
+        const result = state.currentResult; const hero = result.hero || {}; const infosets = classInfosets(result, className); const observed = observedHeroHands(result, className);
+        const infoByCombo = new Map();
+        infosets.forEach((info) => infoByCombo.set(comboKey(info.private_cards), info));
+        observed.forEach((hand) => { if (!infoByCombo.has(comboKey(hand.private_cards))) infoByCombo.set(comboKey(hand.private_cards), hand); });
+        const combos = combosForClass(className); const knownCards = parseKnownCards(state.currentJob?.dead_cards); const blocked = combos.filter((cards) => cards.some((card) => knownCards.includes(card)));
+        const rows = combos.map((cards) => {
+          const info = infoByCombo.get(comboKey(cards)); const actions = info?.actions || []; const dominant = actions.length ? [...actions].sort((left, right) => Number(right.frequency || 0) - Number(left.frequency || 0))[0] : null; const kind = dominant ? actionKindClass(dominant.action?.kind) : 'none';
+          const actionSummary = actions.length ? actions.map((item) => `${actionText(item)} ${(Number(item.frequency || 0) * 100).toFixed(0)}%`).join(' · ') : 'not observed';
+          return `<div class="combo-row"><span class="combo-cards">${formatCards(cards)}</span><span class="combo-visits">${info ? `${Number(info.visits || 0).toLocaleString('ru-RU')} visits` : 'not visited'}</span><span class="combo-dominant ${kind}">${dominant ? `${actionLabel(dominant.action?.kind)} ${(Number(dominant.frequency || 0) * 100).toFixed(0)}%` : '—'}</span><span class="combo-actions">${actionSummary}</span></div>`;
+        }).join('');
+        $('selectionSummary').innerHTML = `<strong>${escapeHtml(className)}</strong> · ${infosets.length || observed.length}/${combos.length} exact combos observed · ${selectedClassActions(result, className) ? 'strategy available' : 'no strategy data'}`;
+        $('comboList').innerHTML = rows || '<div class="analysis-empty">Не удалось развернуть этот class.</div>';
+        const blockedCards = [...new Set(blocked.flat())]; const blockedText = blocked.length ? `<span class="blocked">${blocked.length} blocked</span> by ${escapeHtml(formatCards(blockedCards))}` : '<span class="available">no known blockers</span>';
+        const unobserved = Math.max(0, combos.length - new Set([...infoByCombo.keys()]).size);
+        $('blockerSummary').innerHTML = `Known blockers: ${blockedText}. Coverage leaves ${unobserved} combo${unobserved === 1 ? '' : 's'} unobserved; это может быть range exclusion или sampling coverage.`;
+      }
+      function renderConvergence(result) {
+        const report = result?.strategy_report || {}; const convergence = report.convergence || {}; const utility = report.utility_estimate || {}; const player = result?.hero?.player ?? 0; const playerReport = (convergence.players || []).find((entry) => entry.player === player) || {};
+        const mean = utility.mean?.[player] ?? report.sampled_average_utility?.[player]; const standardError = utility.standard_error?.[player]; const bestResponse = result?.best_response?.players?.find((entry) => entry.player === player);
+        $('convergenceLabel').textContent = convergence.iterations ? `${Number(convergence.iterations).toLocaleString('ru-RU')} iter` : 'diagnostic';
+        $('convergenceContent').innerHTML = `<div class="diagnostic-grid"><div class="diagnostic-metric"><span>Profile utility</span><strong>${formatNumber(mean, 3)}</strong></div><div class="diagnostic-metric"><span>Utility SE</span><strong>${formatNumber(standardError, 3)}</strong></div><div class="diagnostic-metric"><span>Avg positive regret</span><strong>${formatNumber(playerReport.average_positive_regret, 3)}</strong></div><div class="diagnostic-metric"><span>Strategy L1 drift</span><strong>${formatNumber(playerReport.strategy_l1_distance, 3)}</strong></div></div><div class="diagnostic-row"><div class="diagnostic-row-top"><span>Infosets / visits</span><span>${Number(playerReport.infosets || 0).toLocaleString('ru-RU')} / ${Number(playerReport.visits || 0).toLocaleString('ru-RU')}</span></div><div class="diagnostic-track"><i style="width:${Math.min(100, Math.max(0, Number(playerReport.infosets || 0) ? 100 : 0))}%"></i></div></div>${bestResponse ? `<div class="diagnostic-note">Best response improvement: ${formatNumber(bestResponse.improvement, 3)} ± ${formatNumber(bestResponse.improvement_standard_error, 3)}.</div>` : '<div class="diagnostic-note">Best-response probe не включён в этот result. Positive regret и L1 drift полезны для тренда, но не являются exploitability proof.</div>'}`;
+      }
+      function setAnalysisTab(tab) {
+        state.analysisTab = tab;
+        document.querySelectorAll('[data-analysis-tab]').forEach((button) => { const active = button.dataset.analysisTab === tab; button.classList.toggle('active', active); button.setAttribute('aria-selected', active ? 'true' : 'false'); });
+        const grid = document.querySelector('.analysis-grid'); if (grid) grid.classList.toggle('diagnostics-mode', tab === 'diagnostics');
+        $('matrixLegend').innerHTML = tab === 'range' ? '<span><i class="legend-swatch covered"></i>full</span><span><i class="legend-swatch partial"></i>partial</span><span><i class="legend-swatch empty"></i>unseen</span>' : '<span><i class="legend-swatch fold"></i>Fold</span><span><i class="legend-swatch call"></i>Call</span><span><i class="legend-swatch raise"></i>Raise</span><span><i class="legend-swatch allin"></i>All-in</span>';
+        if (state.currentResult) renderMatrix(state.currentResult);
+        if (tab === 'diagnostics') $('analysisSubtitle').textContent = state.currentResult ? 'Convergence diagnostics are shown beside the strategy; use them as trend signals, not exploitability proof.' : 'Diagnostics появятся после завершения solve.';
+        if (tab === 'range') $('analysisSubtitle').textContent = state.currentResult ? 'Matrix coverage shows which exact combos produced visited infosets; click a class for the exact list.' : 'Range coverage появится после solve.';
+      }
+      function setSetupVisible(visible) {
+        document.body.classList.toggle('setup-visible', visible);
+        $('analysisSetupButton').textContent = visible ? 'Скрыть настройки' : 'Настроить spot';
+        if (visible) window.setTimeout(() => $('spotForm').scrollIntoView({ behavior: 'smooth', block: 'start' }), 40);
+      }
+      function renderEmptyAnalysis() {
+        state.currentResult = null; state.selectedClass = null;
+        $('analysisTitle').textContent = 'Spot overview';
+        $('analysisSubtitle').textContent = 'Импортируйте JSON или откройте настройки, чтобы собрать конкретный spot.';
+        $('analysisStatus').textContent = 'No result'; $('analysisStatus').className = 'pill';
+        $('analysisProgress').textContent = 'Ожидает spot'; $('analysisCancelButton').classList.add('hidden');
+        $('matrixColumns').innerHTML = matrixRanks.map((rank) => `<div>${rank}</div>`).join('');
+        $('matrixRows').innerHTML = matrixRanks.map((rank) => `<div>${rank}</div>`).join('');
+        $('handMatrix').innerHTML = matrixRanks.flatMap((_, row) => matrixRanks.map((_, column) => `<div class="hand-cell unseen" data-class="${matrixClass(row, column)}"><span class="cell-name">${matrixClass(row, column)}</span><span class="cell-frequency">—</span></div>`)).join('');
+        $('matrixCaption').textContent = 'awaiting solve'; $('matrixCoverage').textContent = 'no data';
+        $('actionTotal').textContent = '—'; $('actionCards').innerHTML = '<div class="analysis-empty">После solve здесь появятся action frequencies.</div>'; $('actionStack').innerHTML = '';
+        $('analysisTreeNodes').textContent = '—'; $('analysisIterations').textContent = '—'; $('analysisObservedWeight').textContent = '—'; $('analysisMissingHands').textContent = '—';
+        $('convergenceLabel').textContent = 'после solve'; $('convergenceContent').innerHTML = '<div class="analysis-empty">Diagnostics появятся в result JSON. Positive regret — диагностический сигнал, не exploitability proof.</div>';
+        renderDecisionStrip(); renderTableDiagram(); renderSelectionInspector(null); setAnalysisTab('strategy');
+      }
+      function renderDecisionStrip() {
+        const rows = [...document.querySelectorAll('.history-row')];
+        const nodes = rows.map((row) => {
+          const player = row.querySelector('.player-field').value; const kind = row.querySelector('.action-field').value; const target = row.querySelector('.target-input').value;
+          return `<div class="decision-node"><div class="node-player">Seat ${player}</div><div class="node-action">${actionLabel(kind, target && (kind === 'raise' || kind === 'bet') ? target : undefined)}</div><div class="node-detail">observed</div></div>`;
+        });
+        nodes.push(`<div class="decision-node current"><div class="node-player">Seat ${number('heroSeat', 1)} · hero</div><div class="node-action">Decision</div><div class="node-detail">continuation spot</div></div>`);
+        $('decisionStrip').innerHTML = nodes.join('');
+      }
+      function renderTableDiagram() {
+        const size = number('tableSize', 8); const hero = number('heroSeat', 1); const button = number('buttonSeat', 0);
+        const labels = Array.from({ length: size }, (_, index) => `<span class="seat-chip s${index}${index === hero ? ' hero' : ''}">S${index}${index === hero ? '<br>hero' : (index === button ? '<br>D' : '')}</span>`).join('');
+        $('tableDiagram').innerHTML = `<div class="table-oval"></div><div class="table-centre">${text('smallBlind')} / ${text('bigBlind')}<br><span class="muted">ChipEV</span></div><div class="dealer-marker">D</div>${labels}`;
+        $('railStreet').textContent = 'preflop';
+      }
+      function selectMatrixCell(className, actions) {
+        state.selectedClass = className;
+        document.querySelectorAll('.hand-cell').forEach((cell) => cell.classList.toggle('selected', cell.dataset.class === className));
+        const list = actions || selectedClassActions(state.currentResult, className);
+        $('analysisSubtitle').textContent = list ? `${className}: ${list.map((item) => `${actionText(item)} ${(Number(item.frequency || 0) * 100).toFixed(1)}%`).join(' · ')}` : `${className}: в этом spot нет запрошенных combo data.`;
+        renderSelectionInspector(className);
+        renderActionBreakdown(list || [], className);
+      }
+      function renderMatrix(result) {
+        const hero = result.hero || {}; const byClass = averageClassActions(result); const coverage = classCoverageMap(result); const firstInfoset = (result.strategy_report?.infosets || []).find((info) => info.player === hero.player && info.public_node === (hero.public_node ?? 0)); const heroClass = classFromCards(hero.observed_hands?.[0]?.private_cards) || classFromCards(firstInfoset?.private_cards);
+        $('matrixColumns').innerHTML = matrixRanks.map((rank) => `<div>${rank}</div>`).join('');
+        $('matrixRows').innerHTML = matrixRanks.map((rank) => `<div>${rank}</div>`).join('');
+        $('handMatrix').innerHTML = matrixRanks.flatMap((_, row) => matrixRanks.map((_, column) => {
+          const name = matrixClass(row, column); const actions = byClass.get(name); const dominant = dominantAction(actions); const isHero = name === heroClass; const isSelected = name === state.selectedClass; const totalCombos = combosForClass(name).length; const observedCombos = coverage.get(name) || 0; const rangeMode = state.analysisTab === 'range';
+          const top = actions?.length ? [...actions].sort((a, b) => Number(b.frequency || 0) - Number(a.frequency || 0))[0] : null;
+          const strategyPercent = top ? `${(Number(top.frequency || 0) * 100).toFixed(1)}%` : '—'; const rangePercent = totalCombos ? `${observedCombos}/${totalCombos}` : '—';
+          const title = rangeMode ? `${name}: ${observedCombos}/${totalCombos} exact combos observed` : (actions ? `${name}: ${actions.map((item) => `${actionText(item)} ${(Number(item.frequency || 0) * 100).toFixed(1)}%`).join(', ')}` : `${name}: no requested combo data`);
+          const modeClass = rangeMode ? (observedCombos === 0 ? 'range-empty' : (observedCombos < totalCombos ? 'range-partial' : 'range-covered')) : dominant;
+          return `<button class="hand-cell ${modeClass} ${isHero ? 'hero-class' : ''} ${isSelected ? 'selected' : ''}" type="button" title="${escapeHtml(title)}" data-class="${name}"><span class="cell-name">${name}</span><span class="cell-frequency">${rangeMode ? rangePercent : strategyPercent}</span>${rangeMode ? '' : (actions ? `<span class="cell-bar">${actionBar(actions)}</span>` : '')}</button>`;
+        })).join('');
+        $('matrixCaption').textContent = state.analysisTab === 'range' ? `${hero.label || 'Hero'} · exact combo coverage` : `${hero.label || 'Hero'} · ${byClass.size} computed classes · ${hero.observed_hands?.length || 0}/${hero.requested_hands || 0} requested combos`;
+        $('matrixCoverage').textContent = `observed ${(Number(hero.observed_weight || 0)).toFixed(2)} / requested ${(Number(hero.requested_weight || 0)).toFixed(2)}`;
+        $('matrixFootnote').textContent = state.analysisTab === 'range' ? 'Диапазонный вид: N/M — сколько exact combos класса посетил solver. Серый тон обозначает coverage, не действие.' : 'Цвет ячейки — доминирующее действие. Полоска внизу — распределение частот; пустые ячейки не вычислялись.';
+        const selected = state.selectedClass || heroClass;
+        if (selected) selectMatrixCell(selected, byClass.get(selected)); else { renderSelectionInspector(null); renderActionBreakdown(hero.actions || [], hero.label || 'Hero'); }
+        document.querySelectorAll('.hand-cell').forEach((cell) => cell.addEventListener('click', () => selectMatrixCell(cell.dataset.class, byClass.get(cell.dataset.class))));
+      }
+      function renderActionBreakdown(actions, label = 'Hero') {
+        const list = actions || []; const hasEv = list.some((item) => actionEv(item) !== null); $('actionTotal').textContent = `${label} · ${list.length} actions`;
+        $('actionCards').innerHTML = list.length ? list.map((item) => { const kind = item.action?.kind || 'unknown'; const percent = Number(item.frequency || 0) * 100; return `<div class="action-card ${actionKindClass(kind)}"><div class="card-name">${actionText(item)}</div><div class="card-value">${percent.toFixed(1)}%</div><div class="card-meta">positive regret ${Number(item.positive_regret || 0).toFixed(2)}</div><div class="card-ev">${actionEvLabel(item)}</div></div>`; }).join('') : '<div class="analysis-empty">Для этой ячейки нет посещённых infosets.</div>';
+        $('actionStack').innerHTML = actionBar(list); $('actionEvNote').textContent = hasEv ? 'EV/utility из result JSON; проверяйте normalization и pot context.' : 'Per-action EV не экспортирован; positive regret не является EV.';
+      }
+      function renderAnalysis(result) {
+        state.currentResult = result; const hero = result.hero || {}; const observed = hero.observed_hands?.length || 0; const missing = hero.missing_hands?.length || 0;
+        $('analysisTitle').textContent = `${hero.label || 'Hero'} strategy`;
+        $('analysisSubtitle').textContent = `${observed}/${hero.requested_hands || 0} exact combos observed · result is conditional on the current continuation ranges.`;
+        $('analysisStatus').textContent = 'Completed'; $('analysisStatus').className = 'pill completed'; $('analysisProgress').textContent = $('progressText').textContent; $('analysisCancelButton').classList.add('hidden');
+        $('analysisTreeNodes').textContent = $('metrics').querySelectorAll('.metric-value')[0]?.textContent || '—';
+        $('analysisIterations').textContent = $('progressText').textContent.split('/')[0].trim() || '—';
+        $('analysisObservedWeight').textContent = Number(hero.observed_weight || 0).toFixed(2);
+        $('analysisMissingHands').textContent = String(missing);
+        renderDecisionStrip(); renderTableDiagram(); renderConvergence(result); renderMatrix(result);
+        $('analysisWorkspace').classList.remove('hidden'); $('answerPanel').classList.add('hidden');
+        window.setTimeout(() => $('analysisWorkspace').scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
+      }
+      function renderResult(result) {
+        const hero = result.hero || {};
+        const actions = hero.actions || [];
+        $('answerEmpty').classList.add('hidden'); $('answerContent').classList.remove('hidden');
+        $('answerSubhead').textContent = `${hero.label || 'Hero'} · ${hero.observed_hands?.length || 0}/${hero.requested_hands || 0} combos observed`;
+        $('actionList').innerHTML = actions.length ? actions.map((item) => {
+          const frequency = Number(item.frequency || 0); const percent = (frequency * 100).toFixed(1);
+          return `<div class="action-line"><div class="action-line-top"><span class="action-name">${actionText(item)}</span><span class="action-frequency">${percent}%</span></div><div class="action-track"><div class="action-fill" style="width:${Math.max(0, Math.min(100, frequency * 100))}%"></div></div><div class="action-regret">Positive regret: ${Number(item.positive_regret || 0).toFixed(3)} · ${actionEvLabel(item)}</div></div>`;
+        }).join('') : '<div class="answer-empty">В result нет action frequencies.</div>';
+        $('coverageLine').textContent = `Observed weight ${Number(hero.observed_weight || 0).toFixed(3)} из requested ${Number(hero.requested_weight || 0).toFixed(3)}. Missing combos: ${(hero.missing_hands || []).length}.`;
+        $('rawResult').textContent = JSON.stringify(result, null, 2);
+        renderAnalysis(result);
+      }
+      async function validateSpot(silent = false) {
+        setBusy(true);
+        try {
+          const job = makeJob(); state.currentJob = job;
+          const response = await api('/v1/spot/validate', { method: 'POST', body: JSON.stringify(job) });
+          renderMetrics(response.data); setStatus('Spot валиден', 'Valid', 'completed');
+          if (!silent) notify('Spot успешно прошёл structural validation.');
+          return job;
+        } catch (error) { setStatus('Ошибка проверки', 'Error', 'failed'); notify(error.message, true); throw error; }
+        finally { setBusy(false); }
+      }
+      async function queueSolve() {
+        if (state.busy) return;
+        try {
+          const job = await validateSpot(true);
+          const jobId = text('jobId'); if (!jobId) throw new Error('Укажите job id.');
+          const response = await api('/v1/jobs', { method: 'POST', body: JSON.stringify({ job, job_id: jobId, target_iterations: number('iterations', 1000), utility_samples: number('utilitySamples', 32) }) });
+          renderQueued(response.data); notify(`Job ${response.data.job_id} поставлена в очередь.`); pollJob();
+        } catch (_) { /* message already shown */ }
+      }
+      async function pollJob() {
+        if (!state.jobId) return;
+        window.clearTimeout(state.pollTimer);
+        try {
+          const response = await api(`/v1/jobs/${encodeURIComponent(state.jobId)}`);
+          const data = response.data;
+          if (data.manifest) renderManifest(data.manifest); else if (data.status) setStatus(data.status, data.status, data.status.toLowerCase());
+          const status = data.manifest?.status || data.status;
+          if (status === 'Completed') {
+            const resultResponse = await api(`/v1/jobs/${encodeURIComponent(state.jobId)}/result`);
+            renderResult(resultResponse.data.result); notify('Solve завершён.'); return;
+          }
+          if (status === 'Cancelled') { notify('Job отменена.'); return; }
+          if (status === 'Failed') { notify(data.manifest?.error || 'Solver завершился с ошибкой.', true); return; }
+          state.pollTimer = window.setTimeout(pollJob, 900);
+        } catch (error) { notify(error.message, true); state.pollTimer = window.setTimeout(pollJob, 1800); }
+      }
+      async function cancelJob() {
+        if (!state.jobId) return;
+        try { await api(`/v1/jobs/${encodeURIComponent(state.jobId)}/cancel`, { method: 'POST', body: '{}' }); notify('Запрос на отмену отправлен.'); pollJob(); }
+        catch (error) { notify(error.message, true); }
+      }
+      function resetAnswer() {
+        window.clearTimeout(state.pollTimer); state.jobId = null; state.currentResult = null; state.selectedClass = null; setSetupVisible(false); setStatus('Готов к проверке', 'idle'); $('progressBar').style.width = '0%'; $('progressText').textContent = 'Нет активной job'; $('progressPercent').textContent = '0%'; $('jobMeta').innerHTML = '<div><span>Job</span><strong>—</strong></div><div><span>Checkpoint</span><strong>—</strong></div>'; $('cancelButton').classList.add('hidden'); $('analysisCancelButton').classList.add('hidden'); $('answerEmpty').classList.remove('hidden'); $('answerContent').classList.add('hidden'); $('answerSubhead').textContent = 'Пока нет результата'; $('analysisWorkspace').classList.remove('hidden'); $('answerPanel').classList.remove('hidden'); renderEmptyAnalysis();
+      }
+      function exportJob() {
+        try {
+          const job = makeJob(); const blob = new Blob([JSON.stringify(job, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `${text('jobId') || 'holdem-spot'}.json`; anchor.click(); URL.revokeObjectURL(url); notify('JSON job экспортирован.');
+        } catch (error) { notify(error.message, true); }
+      }
+      const builtinPresets = [
+        { id: 'line-ajo', label: 'Current line · AJo', hand: 'AJo', heroLabel: 'SB AJo', heroRange: 'AJo' },
+        { id: 'line-qq', label: 'Current line · QQ', hand: 'QQ', heroLabel: 'SB QQ', heroRange: 'QQ' },
+        { id: 'line-kqs', label: 'Current line · KQs', hand: 'KQs', heroLabel: 'SB KQs', heroRange: 'KQs' }
+      ];
+      function storedPresets() {
+        try { const value = JSON.parse(localStorage.getItem('holdem-lab-presets') || '[]'); return Array.isArray(value) ? value.filter((entry) => entry && entry.id && entry.name && entry.job) : []; }
+        catch (_) { return []; }
+      }
+      function loadPresetOptions() {
+        const select = $('presetSelect'); if (!select) return;
+        select.innerHTML = '<option value="">Presets</option><option disabled>Built-in</option>';
+        builtinPresets.forEach((preset) => { const option = document.createElement('option'); option.value = `builtin:${preset.id}`; option.textContent = preset.label; select.appendChild(option); });
+        const saved = storedPresets();
+        if (saved.length) { const divider = document.createElement('option'); divider.disabled = true; divider.textContent = 'Saved'; select.appendChild(divider); saved.forEach((preset) => { const option = document.createElement('option'); option.value = `saved:${preset.id}`; option.textContent = preset.name; select.appendChild(option); }); }
+      }
+      function applyBuiltinPreset(preset) {
+        setField('tableSize', 8); setField('buttonSeat', 0); setField('smallBlind', 100); setField('bigBlind', 200); setField('ante', 0); setField('anteMode', 'none'); setField('stacks', '16000'); setField('heroSeat', 1); setField('heroHand', preset.hand); setField('heroLabel', preset.heroLabel); setField('deadCards', ''); setField('jobId', `spot-${preset.id}`);
+        $('historyRows').innerHTML = ''; defaultHistory.forEach(addHistoryRow); syncSeatControls(); renderRanges();
+        const heroRange = document.querySelector('.range-input[data-seat="1"]'); if (heroRange) heroRange.value = preset.heroRange;
+        const job = makeJob(); populateJob(job); $('presetSelect').value = `builtin:${preset.id}`; notify(`Preset «${preset.label}» загружен.`);
+      }
+      function applySelectedPreset(value) {
+        if (!value) return;
+        if (value.startsWith('builtin:')) { const preset = builtinPresets.find((entry) => `builtin:${entry.id}` === value); if (preset) applyBuiltinPreset(preset); return; }
+        if (value.startsWith('saved:')) { const preset = storedPresets().find((entry) => `saved:${entry.id}` === value); if (preset) { populateJob(preset.job); notify(`Saved preset «${preset.name}» загружен.`); } }
+      }
+      function savePreset() {
+        try {
+          const name = window.prompt('Название preset', text('heroLabel') || text('jobId') || 'My spot'); if (!name?.trim()) return;
+          const presets = storedPresets(); const job = makeJob(); const entry = { id: `preset-${Date.now()}`, name: name.trim(), job }; presets.push(entry); localStorage.setItem('holdem-lab-presets', JSON.stringify(presets)); loadPresetOptions(); $('presetSelect').value = `saved:${entry.id}`; notify(`Preset «${entry.name}» сохранён локально.`);
+        } catch (error) { notify(`Не удалось сохранить preset: ${error.message}`, true); }
+      }
+      async function importJobFile(file) {
+        if (!file) return;
+        try { populateJob(JSON.parse(await file.text())); }
+        catch (error) { notify(`Не удалось загрузить JSON: ${error.message}`, true); }
+        finally { $('jobFile').value = ''; }
+      }
+      async function checkServer() {
+        try { await api('/healthz', { headers: {} }); $('serverState').className = 'server-state online'; $('serverStateText').textContent = 'Native server online'; }
+        catch (_) { $('serverState').className = 'server-state offline'; $('serverStateText').textContent = 'Native server не найден'; }
+      }
+
+      $('historyRows').addEventListener('change', (event) => { const row = event.target.closest('.history-row'); if (row && event.target.classList.contains('action-field')) updateHistoryRow(row); renderDecisionStrip(); });
+      $('historyRows').addEventListener('click', (event) => { if (event.target.classList.contains('remove-row')) { event.target.closest('.history-row').remove(); renumberHistory(); renderDecisionStrip(); } });
+      $('addHistoryButton').addEventListener('click', () => { addHistoryRow(); renderDecisionStrip(); });
+      $('tableSize').addEventListener('change', () => { syncSeatControls(); renderRanges(); renderDecisionStrip(); renderTableDiagram(); });
+      $('heroSeat').addEventListener('change', () => { renderRanges(); renderDecisionStrip(); renderTableDiagram(); });
+      ['buttonSeat', 'smallBlind', 'bigBlind', 'ante'].forEach((id) => $(id).addEventListener('input', renderTableDiagram));
+      document.querySelectorAll('[data-analysis-tab]').forEach((button) => button.addEventListener('click', () => setAnalysisTab(button.dataset.analysisTab)));
+      $('clearSelectionButton').addEventListener('click', () => { state.selectedClass = null; document.querySelectorAll('.hand-cell').forEach((cell) => cell.classList.remove('selected')); renderSelectionInspector(null); if (state.currentResult) renderActionBreakdown(state.currentResult.hero?.actions || [], 'Hero aggregate'); });
+      $('presetSelect').addEventListener('change', (event) => applySelectedPreset(event.target.value));
+      $('savePresetButton').addEventListener('click', savePreset);
+      $('importButton').addEventListener('click', () => $('jobFile').click());
+      $('jobFile').addEventListener('change', (event) => importJobFile(event.target.files?.[0]));
+      $('exportButton').addEventListener('click', exportJob);
+      $('validateButton').addEventListener('click', () => validateSpot());
+      $('solveButton').addEventListener('click', queueSolve);
+      $('cancelButton').addEventListener('click', cancelJob);
+      $('resetButton').addEventListener('click', resetAnswer);
+      $('analysisSetupButton').addEventListener('click', () => setSetupVisible(!document.body.classList.contains('setup-visible')));
+      $('analysisCancelButton').addEventListener('click', cancelJob);
+      defaultHistory.forEach(addHistoryRow); syncSeatControls(); renderRanges(); loadPresetOptions(); renderEmptyAnalysis(); checkServer();
+    })();
+  </script>
+</body>
+</html>

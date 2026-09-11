@@ -1,0 +1,15 @@
+[package]
+name = "holdem-equity"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+holdem-cards = { path = "../cards" }
+holdem-evaluator = { path = "../evaluator" }
+holdem-ranges = { path = "../ranges" }
+
+[lib]
+name = "holdem_equity"
+path = "src/lib.rs"

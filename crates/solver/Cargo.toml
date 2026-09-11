@@ -1,0 +1,19 @@
+[package]
+name = "holdem-solver-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "holdem_solver_core"
+path = "src/lib.rs"
+
+[dependencies]
+holdem-cards = { path = "../cards" }
+holdem-domain = { path = "../holdem-domain" }
+holdem-ranges = { path = "../ranges" }
+holdem-settlement = { path = "../settlement" }
+holdem-tree = { path = "../tree" }
+serde = { version = "1.0.197", features = ["derive"] }
+serde_json = "1.0.114"

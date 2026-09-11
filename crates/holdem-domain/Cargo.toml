@@ -1,0 +1,13 @@
+[package]
+name = "holdem-domain"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+holdem-cards = { path = "../cards" }
+
+[lib]
+name = "holdem_domain"
+path = "src/lib.rs"

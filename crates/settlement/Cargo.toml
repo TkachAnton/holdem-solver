@@ -1,0 +1,16 @@
+[package]
+name = "holdem-settlement"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+holdem-cards = { path = "../cards" }
+holdem-domain = { path = "../holdem-domain" }
+holdem-equity = { path = "../equity" }
+holdem-ranges = { path = "../ranges" }
+
+[lib]
+name = "holdem_settlement"
+path = "src/lib.rs"

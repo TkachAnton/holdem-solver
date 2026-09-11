@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/cards",
+    "crates/ranges",
+    "crates/evaluator",
+    "crates/equity",
+    "crates/holdem-domain",
+    "crates/tree",
+    "crates/settlement",
+    "crates/solver",
+    "crates/solver-cli",
+    "crates/solver-server",
+]
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+license = "MIT"
+rust-version = "1.75"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
