@@ -6,6 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+holdem-solver-icm = { path = "../icm" }
 holdem-solver-core = { path = "../solver" }
 serde_json = "1.0.114"
 
