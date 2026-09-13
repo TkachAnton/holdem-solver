@@ -51,6 +51,7 @@ name = "holdem-solver-cli"
 version = "0.1.0"
 dependencies = [
  "holdem-solver-core",
+ "holdem-solver-icm",
  "serde_json",
 ]
 
@@ -69,6 +70,10 @@ dependencies = [
 
 [[package]]
 name = "holdem-solver-icm"
+version = "0.1.0"
+
+[[package]]
+name = "holdem-solver-pushfold"
 version = "0.1.0"
 
 [[package]]
