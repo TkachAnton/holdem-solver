@@ -68,6 +68,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "holdem-solver-icm"
+version = "0.1.0"
+
+[[package]]
 name = "holdem-solver-server"
 version = "0.1.0"
 dependencies = [
