@@ -52,6 +52,8 @@ version = "0.1.0"
 dependencies = [
  "holdem-solver-core",
  "holdem-solver-icm",
+ "holdem-solver-pushfold",
+ "serde",
  "serde_json",
 ]
 

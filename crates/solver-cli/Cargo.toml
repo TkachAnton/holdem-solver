@@ -7,7 +7,9 @@ rust-version.workspace = true
 
 [dependencies]
 holdem-solver-icm = { path = "../icm" }
+holdem-solver-pushfold = { path = "../pushfold" }
 holdem-solver-core = { path = "../solver" }
+serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0.114"
 
 [[bin]]
