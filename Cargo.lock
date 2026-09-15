@@ -47,9 +47,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "holdem-solver-abstraction"
+version = "0.1.0"
+
+[[package]]
 name = "holdem-solver-cli"
 version = "0.1.0"
 dependencies = [
+ "holdem-solver-abstraction",
  "holdem-solver-core",
  "holdem-solver-icm",
  "holdem-solver-pushfold",

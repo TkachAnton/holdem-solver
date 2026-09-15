@@ -1,0 +1,8 @@
+[package]
+name = "holdem-solver-abstraction"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+rust-version = "1.75"
+
+[dependencies]

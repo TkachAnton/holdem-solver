@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use holdem_solver_abstraction::{FlopAbstraction, Granularity};
 use holdem_solver_core::{MultiwayBatchJobConfig, MultiwayBatchJobStore, MultiwayHoldemSpotJob};
 use holdem_solver_icm::{all_in_bubble_factor, icm_equity, marginal_bubble_factor};
 use holdem_solver_pushfold::{all_classes, solve_hu, EquityMatrix, PushFoldResult};
@@ -28,6 +29,7 @@ struct CliOptions {
     hero: Option<usize>,
     villain: Option<usize>,
     delta: Option<i64>,
+    granularity: Option<String>,
 }
 
 struct CommandResult {
@@ -36,7 +38,7 @@ struct CommandResult {
 }
 
 fn usage() -> &'static str {
-    "Usage:\n  holdem-solver validate --job JOB.json [--json]\n  holdem-solver solve --job JOB.json --output RESULT.json [--job-dir DIR] [--iterations N] [--utility-samples N] [--job-id ID] [--json]\n  holdem-solver icm --stacks S1,S2,... --payouts P1,P2,... [--hero INDEX] [--villain INDEX] [--delta N] [--json]\n  holdem-solver pushfold [--stack N] [--matrix-boards N] [--output RESULT.json] [--json]\n\nCommands:\n  validate  Parse the JSON job, validate history, and build the configured tree.\n  solve     Run or resume a persistent arena job and write a JSON spot result.\n  icm       Compute exact ICM equity and bubble factors for stacks and payouts.\n  pushfold  Solve heads-up push/fold for a given effective stack.\n\nOutput:\n  --json    Emit one machine-readable JSON success or error envelope."
+    "Usage:\n  holdem-solver validate --job JOB.json [--json]\n  holdem-solver solve --job JOB.json --output RESULT.json [--job-dir DIR] [--iterations N] [--utility-samples N] [--job-id ID] [--json]\n  holdem-solver icm --stacks S1,S2,... --payouts P1,P2,... [--hero INDEX] [--villain INDEX] [--delta N] [--json]\n  holdem-solver pushfold [--stack N] [--matrix-boards N] [--output RESULT.json] [--json]\n\nCommands:\n  validate  Parse the JSON job, validate history, and build the configured tree.\n  solve     Run or resume a persistent arena job and write a JSON spot result.\n  icm       Compute exact ICM equity and bubble factors for stacks and payouts.\n  pushfold  Solve heads-up push/fold for a given effective stack.\n  flop-clusters  Deterministic flop feature clustering report (1755 classes).\n\nOutput:\n  --json    Emit one machine-readable JSON success or error envelope."
 }
 
 fn main() {
@@ -79,6 +81,7 @@ fn run() -> Result<CommandResult, String> {
         "solve" => solve_command(options),
         "icm" => icm_command(options),
         "pushfold" => pushfold_command(options),
+        "flop-clusters" => flop_clusters_command(options),
         _ => Err(format!("unknown command: {}", options.command)),
     }
 }
@@ -471,6 +474,7 @@ fn parse_args() -> Result<CliOptions, String> {
         "validate" | "solve" => parse_job_args(&arguments, &command),
         "icm" => parse_icm_args(&arguments),
         "pushfold" => parse_pushfold_args(&arguments),
+        "flop-clusters" => parse_flop_clusters_args(&arguments),
         _ => Err(format!("unknown command: {command}")),
     }
 }
@@ -540,6 +544,7 @@ fn parse_job_args(arguments: &[String], command: &str) -> Result<CliOptions, Str
         hero: None,
         villain: None,
         delta: None,
+        granularity: None,
     })
 }
 
@@ -614,6 +619,7 @@ fn parse_icm_args(arguments: &[String]) -> Result<CliOptions, String> {
         iterations: None,
         utility_samples: 0,
         job_id: None,
+        granularity: None,
         stack_bb: None,
         matrix_boards: None,
         stacks: Some(stacks),
@@ -685,9 +691,96 @@ fn parse_pushfold_args(arguments: &[String]) -> Result<CliOptions, String> {
         hero: None,
         villain: None,
         delta: None,
+        granularity: None,
     })
 }
 
+// ---------------------------------------------------------------------------
+// Flop abstraction report (T3.1 v1, сессия 10)
+// ---------------------------------------------------------------------------
+
+fn flop_clusters_command(options: CliOptions) -> Result<CommandResult, String> {
+    let granularity = match options.granularity.as_deref() {
+        None => Granularity::Medium,
+        Some("coarse") => Granularity::Coarse,
+        Some("medium") => Granularity::Medium,
+        Some("fine") => Granularity::Fine,
+        Some(other) => return Err(format!("unknown granularity: {other}")),
+    };
+    let abstraction = FlopAbstraction::new(granularity);
+    let histogram = abstraction.histogram();
+    let mut human_lines = vec![
+        format!("flop_classes={}", abstraction.class_count()),
+        format!("granularity={granularity}"),
+        format!("used_buckets={}", abstraction.used_buckets()),
+        format!("fingerprint={:#018x}", abstraction.fingerprint()),
+        "top_buckets:".to_string(),
+    ];
+    for (bucket, count) in histogram.iter().take(10) {
+        human_lines.push(format!("  bucket={bucket} flops={count}"));
+    }
+    let buckets: Vec<Value> = histogram
+        .iter()
+        .map(|(bucket, count)| json!({ "bucket": bucket, "flops": count }))
+        .collect();
+    Ok(CommandResult {
+        human_lines,
+        json: json!({
+            "ok": true,
+            "command": "flop-clusters",
+            "data": {
+                "flop_classes": abstraction.class_count(),
+                "granularity": format!("{granularity}"),
+                "used_buckets": abstraction.used_buckets(),
+                "fingerprint": abstraction.fingerprint(),
+                "buckets": buckets,
+            }
+        }),
+    })
+}
+
+fn parse_flop_clusters_args(arguments: &[String]) -> Result<CliOptions, String> {
+    let mut granularity: Option<String> = None;
+    let mut index = 1;
+    while index < arguments.len() {
+        let flag = &arguments[index];
+        match flag.as_str() {
+            "--granularity" => {
+                index += 1;
+                granularity = Some(
+                    arguments
+                        .get(index)
+                        .ok_or_else(|| "missing value for --granularity".to_string())?
+                        .clone(),
+                );
+            }
+            "--json" => {}
+            "--help" | "-h" => {
+                println!("{}", usage());
+                std::process::exit(0);
+            }
+            other => return Err(format!("unknown option: {other}")),
+        }
+        index += 1;
+    }
+    Ok(CliOptions {
+        command: "flop-clusters".to_string(),
+        job_path: PathBuf::new(),
+        output_path: None,
+        job_directory: None,
+        iterations: None,
+        utility_samples: 0,
+        job_id: None,
+        stack_bb: None,
+        matrix_boards: None,
+        stacks: None,
+        payouts: None,
+        hero: None,
+        villain: None,
+        delta: None,
+        granularity,
+    })
+}
 fn nonzero(value: u64) -> Option<u64> {
     (value > 0).then_some(value)
 }

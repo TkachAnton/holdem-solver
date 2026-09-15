@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/icm",
     "crates/pushfold",
+    "crates/abstraction",
     "crates/cards",
     "crates/ranges",
     "crates/evaluator",
