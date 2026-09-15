@@ -521,6 +521,52 @@ pub fn solve_hu(
     })
 }
 
+/// Точная эквити конкретной пары рук: полный перебор C(48,5) бордов.
+///
+/// Никакого Монте-Карло: 1 712 304 ранаута, ничья = 0.5.
+/// Назначение — тесты и верификация ячеек матрицы, не полная матрица
+/// (см. D-014: полный перебор всех пар классов ~48e9 оценок — часы).
+pub fn exact_equity(a: (u8, u8), b: (u8, u8)) -> f64 {
+    let mut dead = [false; 52];
+    for &card in &[a.0, a.1, b.0, b.1] {
+        assert!(card < 52, "card out of range: {card}");
+        assert!(!dead[card as usize], "duplicate card in matchup: {card}");
+        dead[card as usize] = true;
+    }
+    let remaining: Vec<u8> = (0u8..52).filter(|&card| !dead[card as usize]).collect();
+    let n = remaining.len();
+    let mut wins = 0.0f64;
+    let mut runouts = 0u64;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            for k in (j + 1)..n {
+                for l in (k + 1)..n {
+                    for m in (l + 1)..n {
+                        let board = [
+                            remaining[i],
+                            remaining[j],
+                            remaining[k],
+                            remaining[l],
+                            remaining[m],
+                        ];
+                        let sa =
+                            evaluate(&[a.0, a.1, board[0], board[1], board[2], board[3], board[4]]);
+                        let sb =
+                            evaluate(&[b.0, b.1, board[0], board[1], board[2], board[3], board[4]]);
+                        if sa > sb {
+                            wins += 1.0;
+                        } else if sa == sb {
+                            wins += 0.5;
+                        }
+                        runouts += 1;
+                    }
+                }
+            }
+        }
+    }
+    debug_assert_eq!(runouts, 1_712_304);
+    wins / runouts as f64
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -852,5 +898,88 @@ mod tests {
             !res.button_push[class_index(c('7', 'c'), c('2', 'd'))],
             "50bb: 72o не пушится"
         );
+    }
+    #[test]
+    #[ignore] // ~10 c в release: 3 точных перебора + MC-сверка.
+    fn exact_equity_reference() {
+        let aa = (c('A', 'h'), c('A', 'd'));
+        let kk = (c('K', 'h'), c('K', 's'));
+        let e_ak = exact_equity(aa, kk);
+        let e_ka = exact_equity(kk, aa);
+        assert!(
+            (e_ak + e_ka - 1.0).abs() < 1e-9,
+            "антисимметрия точного перебора: {e_ak} + {e_ka}"
+        );
+        // Классический якорь: AA vs KK = 81.95% — стандартный результат
+        // полного перебора; кросс-проверен нашим MC на 40k бордов (фикстура
+        // 0.819 +- 0.025 уже зелёная, окно согласовано).
+        assert!(
+            (e_ak - 0.8195).abs() < 0.004,
+            "AA vs KK точная эквити: {e_ak}"
+        );
+        let mut rng = Rng::new(0xE7AC_0001);
+        let mc = equity_mc(aa, kk, &mut rng, 40_000);
+        assert!((e_ak - mc).abs() < 0.012, "exact {e_ak} vs mc {mc}");
+        let aks = (c('A', 's'), c('K', 's'));
+        let qq = (c('Q', 'h'), c('Q', 'd'));
+        let e_sq = exact_equity(aks, qq);
+        let mc_sq = equity_mc(aks, qq, &mut rng, 40_000);
+        assert!((e_sq - mc_sq).abs() < 0.012, "exact {e_sq} vs mc {mc_sq}");
+        println!("exact: AA-KK={e_ak:.4} AKs-QQ={e_sq:.4}");
+    }
+
+    #[test]
+    #[ignore] // ~10 мин в release: матрица 20000 бордов + ~20 переборов.
+    /// Вердикт по открытому вопросу сессии 7: подозрительные ячейки
+    /// production-матрицы против точных значений.
+    fn matrix_cells_vs_exact() {
+        let classes = all_classes();
+        let m = EquityMatrix::compute(&classes, 20000, 0x5EED_0001).unwrap();
+        let pairs = [
+            ((c('K', 'h'), c('5', 'd')), (c('A', 'h'), c('5', 'c'))),
+            ((c('Q', 'h'), c('8', 'd')), (c('A', 'h'), c('5', 'c'))),
+            ((c('J', 'h'), c('9', 'd')), (c('A', 'h'), c('J', 'c'))),
+            ((c('T', 'h'), c('9', 'd')), (c('A', 'h'), c('J', 'c'))),
+            ((c('K', 's'), c('5', 'd')), (c('K', 'h'), c('Q', 'd'))),
+            ((c('Q', 's'), c('8', 'd')), (c('K', 'h'), c('Q', 'd'))),
+        ];
+        let mut worst = 0.0f64;
+        for &(hero, villain) in &pairs {
+            let ci = class_index(hero.0, hero.1);
+            let cj = class_index(villain.0, villain.1);
+            let mut matchups = Vec::new();
+            for &ha in &classes[ci].combos {
+                for &hb in &classes[cj].combos {
+                    if ha.0 == hb.0 || ha.0 == hb.1 || ha.1 == hb.0 || ha.1 == hb.1 {
+                        continue;
+                    }
+                    matchups.push((ha, hb));
+                }
+            }
+            let take = matchups.len().min(4);
+            if take == 0 {
+                continue;
+            }
+            let exact_avg: f64 = matchups
+                .iter()
+                .take(take)
+                .map(|&(ha, hb)| exact_equity(ha, hb))
+                .sum::<f64>()
+                / take as f64;
+            let cell = m.at(ci, cj);
+            let delta = (cell - exact_avg).abs();
+            worst = worst.max(delta);
+            println!(
+                "{} vs {}: matrix={:.4} exact({})={:.4} delta={:.4}",
+                classes[ci].label, classes[cj].label, cell, take, exact_avg, delta
+            );
+            assert!(
+                delta < 0.025,
+                "ячейка матрицы отклонилась от точного значения: {} vs {}: {delta}",
+                classes[ci].label,
+                classes[cj].label
+            );
+        }
+        println!("matrix_vs_exact: худшая дельта {worst:.4}");
     }
 }
