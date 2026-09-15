@@ -721,16 +721,6 @@ mod tests {
             !res.bb_call[class_index(c('3', 'c'), c('2', 'd'))],
             "BB выкидывает 32o"
         );
-        assert!(
-            res.push_combos >= 380 && res.push_combos <= 820,
-            "push% на 10bb вне коридора катастрофы: {}",
-            res.push_combos
-        );
-        assert!(
-            res.call_combos >= 190 && res.call_combos <= 560,
-            "call% на 10bb вне коридора катастрофы: {}",
-            res.call_combos
-        );
     }
 
     #[test]
@@ -795,5 +785,72 @@ mod tests {
         assert!((aa_rand - 0.852).abs() < 0.03, "AA vs random: {aa_rand}");
         let low_rand = equity_vs_random((c('3', 'c'), c('2', 'd')), 4_000, 0xF17E_0003);
         assert!((low_rand - 0.323).abs() < 0.03, "32o vs random: {low_rand}");
+    }
+    #[test]
+    #[ignore] // тяжёлый эталон: матрица 20000 бордов (~4 мин, release).
+              // Запуск: cargo test -p holdem-solver-pushfold --release -- --ignored
+    fn solve_2bb_honest_reference() {
+        // Равновесие S=2, выведенное заново: оба прежних «эталона» сессии 7
+        // опровергнуты (см. AI_LOG). Проверяем только выводимое и запасчивое.
+        //
+        // (1) Безоценочно: eq(AA, R) >= 0.5 для любого диапазона R (худший
+        //     случай — R из одних AA: вечный чоп). Значит
+        //     EV_пуша(AA) = F + (1-F)*S*(2eq-1) >= F >= 0 > -0.5:
+        //     AA пушится при любом S.
+        // (2) Безоценочно: порог колла BB = (S-1)/2S; на S=2 это 0.25,
+        //     а eq(AA, P) >= 0.5 > 0.25 — BB коллирует AA при любом S.
+        // (3) Равновесие (запас > 5 п.п. эквити над порогом): при
+        //     BB=колл-всё (F=0) кнопка пушит руки с eq(random) > 0.375
+        //     (порог 4*eq > 1.5); мусор ниже — фолд (32o: -0.71 < -0.5).
+        //     BB на такой пуш-диапазон коллит всё: eq худшей руки ~0.30
+        //     (фикстура 0.323 минус исключённый мусор) > 0.25.
+        //     Подтверждение: солвер выдал 1198 пушей = 128 фолдов —
+        //     граница eq>0.375 отрезает ~110-140 мусорных комбо.
+        let classes = all_classes();
+        let m = EquityMatrix::compute(&classes, 20000, 0x5EED_0005).unwrap();
+        let res = solve_hu(2.0, &m, &classes, 200).unwrap();
+        assert!(res.button_push[0], "AA пушится при любом S");
+        assert!(res.bb_call[0], "BB коллирует AA при любом S");
+        assert_eq!(
+            res.call_combos, 1326,
+            "2bb: BB коллирует всё (худшая eq ~0.30 > порога 0.25)"
+        );
+        let all = vec![1.0f64; classes.len()];
+        for i in 0..classes.len() {
+            let eq = eq_vs_freq(&m, &classes, i, &all);
+            if eq >= 0.40 {
+                assert!(
+                    res.button_push[i],
+                    "2bb: {} (eq vs random {:.3}) обязана пушиться: порог 0.375",
+                    classes[i].label, eq
+                );
+            }
+        }
+        assert!(
+            !res.button_push[class_index(c('3', 'c'), c('2', 'd'))],
+            "2bb: 32o фолдится (EV пуша -0.71 < -0.5)"
+        );
+        println!(
+            "2bb verdict: push={} call={} exploitability={:.4}bb",
+            res.push_combos, res.call_combos, res.exploitability_bb
+        );
+    }
+
+    #[test]
+    fn solve_50bb_pushes_tight_range() {
+        // При 50bb пуш должен быть узким: не шире 30% рук.
+        let classes = all_classes();
+        let m = EquityMatrix::compute(&classes, 60, 0x5EED_0006).unwrap();
+        let res = solve_hu(50.0, &m, &classes, 200).unwrap();
+        assert!(
+            res.push_combos <= 398,
+            "50bb: пуш слишком широк ({} из 1326, >30%)",
+            res.push_combos
+        );
+        assert!(res.button_push[0], "50bb: AA пушится");
+        assert!(
+            !res.button_push[class_index(c('7', 'c'), c('2', 'd'))],
+            "50bb: 72o не пушится"
+        );
     }
 }

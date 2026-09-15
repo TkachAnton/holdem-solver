@@ -4,3 +4,5 @@
 .vscode/
 .idea/
 holdem-solver-src.zip
+__pycache__/
+.pushfold-matrix-*.json
