@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use holdem_solver_core::{MultiwayBatchJobConfig, MultiwayBatchJobStore, MultiwayHoldemSpotJob};
+use holdem_solver_icm::{all_in_bubble_factor, icm_equity, marginal_bubble_factor};
 use holdem_solver_pushfold::{all_classes, solve_hu, EquityMatrix, PushFoldResult};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -22,6 +23,11 @@ struct CliOptions {
     job_id: Option<String>,
     stack_bb: Option<f64>,
     matrix_boards: Option<usize>,
+    stacks: Option<Vec<i64>>,
+    payouts: Option<Vec<i64>>,
+    hero: Option<usize>,
+    villain: Option<usize>,
+    delta: Option<i64>,
 }
 
 struct CommandResult {
@@ -30,7 +36,7 @@ struct CommandResult {
 }
 
 fn usage() -> &'static str {
-    "Usage:\n  holdem-solver validate --job JOB.json [--json]\n  holdem-solver solve --job JOB.json --output RESULT.json [--job-dir DIR] [--iterations N] [--utility-samples N] [--job-id ID] [--json]\n  holdem-solver pushfold [--stack N] [--matrix-boards N] [--output RESULT.json] [--json]\n\nCommands:\n  validate  Parse the JSON job, validate history, and build the configured tree.\n  solve     Run or resume a persistent arena job and write a JSON spot result.\n  pushfold  Solve heads-up push/fold for a given effective stack.\n\nOutput:\n  --json    Emit one machine-readable JSON success or error envelope."
+    "Usage:\n  holdem-solver validate --job JOB.json [--json]\n  holdem-solver solve --job JOB.json --output RESULT.json [--job-dir DIR] [--iterations N] [--utility-samples N] [--job-id ID] [--json]\n  holdem-solver icm --stacks S1,S2,... --payouts P1,P2,... [--hero INDEX] [--villain INDEX] [--delta N] [--json]\n  holdem-solver pushfold [--stack N] [--matrix-boards N] [--output RESULT.json] [--json]\n\nCommands:\n  validate  Parse the JSON job, validate history, and build the configured tree.\n  solve     Run or resume a persistent arena job and write a JSON spot result.\n  icm       Compute exact ICM equity and bubble factors for stacks and payouts.\n  pushfold  Solve heads-up push/fold for a given effective stack.\n\nOutput:\n  --json    Emit one machine-readable JSON success or error envelope."
 }
 
 fn main() {
@@ -71,6 +77,7 @@ fn run() -> Result<CommandResult, String> {
     match options.command.as_str() {
         "validate" => validate_command(options),
         "solve" => solve_command(options),
+        "icm" => icm_command(options),
         "pushfold" => pushfold_command(options),
         _ => Err(format!("unknown command: {}", options.command)),
     }
@@ -188,6 +195,90 @@ fn solve_command(options: CliOptions) -> Result<CommandResult, String> {
 }
 
 // ---------------------------------------------------------------------------
+// ICM (T1.3; восстановлено в сессии 9 после регрессии f56f046)
+// ---------------------------------------------------------------------------
+
+fn icm_command(options: CliOptions) -> Result<CommandResult, String> {
+    let stacks = options
+        .stacks
+        .ok_or_else(|| "missing --stacks".to_string())?;
+    let payouts = options
+        .payouts
+        .ok_or_else(|| "missing --payouts".to_string())?;
+
+    let result = icm_equity(&stacks, &payouts).map_err(|e| e.to_string())?;
+
+    let mut human_lines = vec![
+        format!("players={}", stacks.len()),
+        format!("prize_pool={}", payouts.iter().sum::<i64>()),
+    ];
+    for (i, ev) in result.ev.iter().enumerate() {
+        human_lines.push(format!("player_{i}=${ev:.2}"));
+    }
+
+    let mut data = json!({
+        "players": stacks.len(),
+        "prize_pool": payouts.iter().sum::<i64>(),
+        "ev": result.ev,
+        "place_probs": result.place_probs,
+    });
+
+    if let (Some(hero), Some(villain)) = (options.hero, options.villain) {
+        let bubble =
+            all_in_bubble_factor(&stacks, &payouts, hero, villain).map_err(|e| e.to_string())?;
+        human_lines.push(format!(
+            "all_in_bubble_factor_hero_{hero}_vs_{villain}={:.4}",
+            bubble.bubble_factor
+        ));
+        human_lines.push(format!("effective_stack={}", bubble.effective_stack));
+        human_lines.push(format!("current_ev={:.2}", bubble.current_ev));
+        human_lines.push(format!("win_ev={:.2}", bubble.win_ev));
+        human_lines.push(format!("lose_ev={:.2}", bubble.lose_ev));
+        data["all_in_bubble_factor"] = json!({
+            "hero": hero,
+            "villain": villain,
+            "effective_stack": bubble.effective_stack,
+            "current_ev": bubble.current_ev,
+            "win_ev": bubble.win_ev,
+            "lose_ev": bubble.lose_ev,
+            "bubble_factor": bubble.bubble_factor,
+        });
+    }
+
+    if let (Some(hero), Some(villain), Some(delta)) = (options.hero, options.villain, options.delta)
+    {
+        let marginal = marginal_bubble_factor(&stacks, &payouts, hero, villain, delta)
+            .map_err(|e| e.to_string())?;
+        human_lines.push(format!(
+            "marginal_bubble_factor_hero_{hero}_vs_{villain}_delta_{delta}={:.4}",
+            marginal
+        ));
+        data["marginal_bubble_factor"] = json!({
+            "hero": hero,
+            "villain": villain,
+            "delta": delta,
+            "bubble_factor": marginal,
+        });
+    }
+
+    Ok(CommandResult {
+        human_lines,
+        json: json!({
+            "ok": true,
+            "command": "icm",
+            "data": data,
+        }),
+    })
+}
+
+fn parse_i64_list(s: &str) -> Result<Vec<i64>, String> {
+    s.split(',')
+        .map(|part| part.trim().parse::<i64>())
+        .collect::<Result<Vec<i64>, _>>()
+        .map_err(|e| format!("invalid list: {e}"))
+}
+
+// ---------------------------------------------------------------------------
 // Push/fold (T2.3)
 // ---------------------------------------------------------------------------
 
@@ -199,19 +290,22 @@ struct MatrixCache {
 }
 
 fn matrix_cache_path(boards: usize) -> PathBuf {
-    PathBuf::from(format!(".pushfold-matrix-{}.json", boards))
+    PathBuf::from(format!(".pushfold-matrix-{boards}.json"))
 }
 
-fn load_or_compute_matrix(boards: usize) -> Result<EquityMatrix, String> {
+fn load_or_compute_matrix(boards: usize) -> Result<(EquityMatrix, bool), String> {
     let cache_path = matrix_cache_path(boards);
     if cache_path.exists() {
         if let Ok(text) = fs::read_to_string(&cache_path) {
             if let Ok(cache) = serde_json::from_str::<MatrixCache>(&text) {
                 if cache.boards == boards && cache.n == 169 {
-                    return Ok(EquityMatrix {
-                        n: cache.n,
-                        e: cache.e,
-                    });
+                    return Ok((
+                        EquityMatrix {
+                            n: cache.n,
+                            e: cache.e,
+                        },
+                        true,
+                    ));
                 }
             }
         }
@@ -226,11 +320,11 @@ fn load_or_compute_matrix(boards: usize) -> Result<EquityMatrix, String> {
     if let Ok(json) = serde_json::to_string(&cache) {
         let _ = write_text_atomically(&cache_path, &json);
     }
-    Ok(matrix)
+    Ok((matrix, false))
 }
 
 /// Сетка 13x13: i — строка (A сверху), j — столбец.
-/// hi >= lo всегда; пара = строка i; выше диагонали suited, ниже — offsuit.
+/// hi >= lo всегда; выше диагонали suited, ниже — offsuit, диагональ — пары.
 fn grid_to_class(i: usize, j: usize) -> usize {
     let (hi, lo) = if i <= j {
         (12 - i, 12 - j)
@@ -251,7 +345,7 @@ fn pushfold_grid_lines(result: &PushFoldResult, which: &str) -> Vec<String> {
         'A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', '2',
     ];
     let mut lines = Vec::new();
-    lines.push(format!("{}:", which));
+    lines.push(format!("{which}:"));
     let mut header = String::from("    ");
     for &r in ranks.iter() {
         header.push(r);
@@ -270,12 +364,10 @@ fn pushfold_grid_lines(result: &PushFoldResult, which: &str) -> Vec<String> {
                 } else {
                     "."
                 }
+            } else if result.bb_call[idx] {
+                "C"
             } else {
-                if result.bb_call[idx] {
-                    "C"
-                } else {
-                    "."
-                }
+                "."
             };
             line.push_str(action);
             line.push(' ');
@@ -287,13 +379,20 @@ fn pushfold_grid_lines(result: &PushFoldResult, which: &str) -> Vec<String> {
 
 fn pushfold_command(options: CliOptions) -> Result<CommandResult, String> {
     let stack_bb = options.stack_bb.unwrap_or(10.0);
+    // Реальный дефолт — здесь (фикс сессии 9: раньше 200, «20000»
+    // из сессии 7 меняло мёртвый код и не работало).
     let matrix_boards = options.matrix_boards.unwrap_or(20000);
-    let matrix = load_or_compute_matrix(matrix_boards)?;
+    let (matrix, cached) = load_or_compute_matrix(matrix_boards)?;
     let classes = all_classes();
     let result = solve_hu(stack_bb, &matrix, &classes, 60).map_err(|e| e.to_string())?;
 
     let mut human_lines = Vec::new();
     human_lines.push(format!("pushfold stack={stack_bb}bb"));
+    human_lines.push(if cached {
+        "matrix=cached".to_string()
+    } else {
+        format!("matrix=computed(boards={matrix_boards})")
+    });
     human_lines.push(format!("exploitability={:.4}bb", result.exploitability_bb));
     human_lines.push(format!("push_combos={}", result.push_combos));
     human_lines.push(format!("call_combos={}", result.call_combos));
@@ -358,7 +457,7 @@ fn pushfold_command(options: CliOptions) -> Result<CommandResult, String> {
 }
 
 // ---------------------------------------------------------------------------
-// Arg parsing
+// Разбор аргументов
 // ---------------------------------------------------------------------------
 
 fn parse_args() -> Result<CliOptions, String> {
@@ -370,6 +469,7 @@ fn parse_args() -> Result<CliOptions, String> {
     let command = arguments[0].clone();
     match command.as_str() {
         "validate" | "solve" => parse_job_args(&arguments, &command),
+        "icm" => parse_icm_args(&arguments),
         "pushfold" => parse_pushfold_args(&arguments),
         _ => Err(format!("unknown command: {command}")),
     }
@@ -435,12 +535,99 @@ fn parse_job_args(arguments: &[String], command: &str) -> Result<CliOptions, Str
         job_id,
         stack_bb: None,
         matrix_boards: None,
+        stacks: None,
+        payouts: None,
+        hero: None,
+        villain: None,
+        delta: None,
+    })
+}
+
+fn parse_icm_args(arguments: &[String]) -> Result<CliOptions, String> {
+    let mut stacks: Option<Vec<i64>> = None;
+    let mut payouts: Option<Vec<i64>> = None;
+    let mut hero: Option<usize> = None;
+    let mut villain: Option<usize> = None;
+    let mut delta: Option<i64> = None;
+    let mut index = 1;
+    while index < arguments.len() {
+        let flag = &arguments[index];
+        let value = |index: &mut usize| -> Result<String, String> {
+            *index += 1;
+            arguments
+                .get(*index)
+                .cloned()
+                .ok_or_else(|| format!("missing value for {flag}"))
+        };
+        match flag.as_str() {
+            "--stacks" => {
+                let text = value(&mut index)?;
+                stacks = Some(parse_i64_list(&text)?);
+            }
+            "--payouts" => {
+                let text = value(&mut index)?;
+                payouts = Some(parse_i64_list(&text)?);
+            }
+            "--hero" => {
+                hero = Some(
+                    value(&mut index)?
+                        .parse::<usize>()
+                        .map_err(|error| format!("invalid --hero: {error}"))?,
+                );
+            }
+            "--villain" => {
+                villain = Some(
+                    value(&mut index)?
+                        .parse::<usize>()
+                        .map_err(|error| format!("invalid --villain: {error}"))?,
+                );
+            }
+            "--delta" => {
+                delta = Some(
+                    value(&mut index)?
+                        .parse::<i64>()
+                        .map_err(|error| format!("invalid --delta: {error}"))?,
+                );
+            }
+            "--json" => {}
+            "--help" | "-h" => {
+                println!("{}", usage());
+                std::process::exit(0);
+            }
+            other => return Err(format!("unknown option: {other}")),
+        }
+        index += 1;
+    }
+    if hero.is_some() && villain.is_none() {
+        return Err("--villain is required when --hero is provided".to_string());
+    }
+    if hero.is_none() && villain.is_some() {
+        return Err("--hero is required when --villain is provided".to_string());
+    }
+    let stacks = stacks.ok_or_else(|| "missing --stacks".to_string())?;
+    let payouts = payouts.ok_or_else(|| "missing --payouts".to_string())?;
+    Ok(CliOptions {
+        command: "icm".to_string(),
+        job_path: PathBuf::new(),
+        output_path: None,
+        job_directory: None,
+        iterations: None,
+        utility_samples: 0,
+        job_id: None,
+        stack_bb: None,
+        matrix_boards: None,
+        stacks: Some(stacks),
+        payouts: Some(payouts),
+        hero,
+        villain,
+        delta,
     })
 }
 
 fn parse_pushfold_args(arguments: &[String]) -> Result<CliOptions, String> {
     let mut stack_bb = 10.0f64;
-    let mut matrix_boards = 200usize;
+    // Реальный дефолт — здесь, в parse (см. фикс сессии 9).
+    let mut matrix_boards = 20000usize;
     let mut output_path = None;
     let mut index = 1;
     while index < arguments.len() {
@@ -493,6 +680,11 @@ fn parse_pushfold_args(arguments: &[String]) -> Result<CliOptions, String> {
         job_id: None,
         stack_bb: Some(stack_bb),
         matrix_boards: Some(matrix_boards),
+        stacks: None,
+        payouts: None,
+        hero: None,
+        villain: None,
+        delta: None,
     })
 }
 
