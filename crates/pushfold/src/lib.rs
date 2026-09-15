@@ -764,4 +764,36 @@ mod tests {
         let empty: Vec<ClassInfo> = Vec::new();
         assert!(solve_hu(10.0, &m, &empty, 5).is_err());
     }
+    #[test]
+    fn exact_equity_fixtures() {
+        // D-013: доверенные точные якоря, а не память агента.
+        // AA vs KK ~ 81.9%, AKs vs QQ ~ 46.2%, AKo vs 22 ~ 47.6%,
+        // AA vs random ~ 85.2%, 32o vs random ~ 32.3% (худшая рука).
+        let mut rng = Rng::new(0xF17E_0001);
+        let aa_kk = equity_mc(
+            (c('A', 'h'), c('A', 'd')),
+            (c('K', 'h'), c('K', 's')),
+            &mut rng,
+            40_000,
+        );
+        assert!((aa_kk - 0.819).abs() < 0.025, "AA vs KK: {aa_kk}");
+        let aks_qq = equity_mc(
+            (c('A', 's'), c('K', 's')),
+            (c('Q', 'h'), c('Q', 'd')),
+            &mut rng,
+            40_000,
+        );
+        assert!((aks_qq - 0.462).abs() < 0.025, "AKs vs QQ: {aks_qq}");
+        let ako_22 = equity_mc(
+            (c('A', 'h'), c('K', 'd')),
+            (c('2', 'c'), c('2', 's')),
+            &mut rng,
+            40_000,
+        );
+        assert!((ako_22 - 0.476).abs() < 0.025, "AKo vs 22: {ako_22}");
+        let aa_rand = equity_vs_random((c('A', 'h'), c('A', 'd')), 4_000, 0xF17E_0002);
+        assert!((aa_rand - 0.852).abs() < 0.03, "AA vs random: {aa_rand}");
+        let low_rand = equity_vs_random((c('3', 'c'), c('2', 'd')), 4_000, 0xF17E_0003);
+        assert!((low_rand - 0.323).abs() < 0.03, "32o vs random: {low_rand}");
+    }
 }

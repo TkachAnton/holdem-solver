@@ -229,16 +229,19 @@ fn load_or_compute_matrix(boards: usize) -> Result<EquityMatrix, String> {
     Ok(matrix)
 }
 
+/// Сетка 13x13: i — строка (A сверху), j — столбец.
+/// hi >= lo всегда; пара = строка i; выше диагонали suited, ниже — offsuit.
 fn grid_to_class(i: usize, j: usize) -> usize {
-    if i == j {
-        i
+    let (hi, lo) = if i <= j {
+        (12 - i, 12 - j)
+    } else {
+        (12 - j, 12 - i)
+    };
+    if hi == lo {
+        12 - hi
     } else if i < j {
-        let hi = 12 - i;
-        let lo = 12 - j;
         13 + hi * (hi - 1) / 2 + lo
     } else {
-        let hi = 12 - j;
-        let lo = 12 - i;
         91 + hi * (hi - 1) / 2 + lo
     }
 }
@@ -284,7 +287,7 @@ fn pushfold_grid_lines(result: &PushFoldResult, which: &str) -> Vec<String> {
 
 fn pushfold_command(options: CliOptions) -> Result<CommandResult, String> {
     let stack_bb = options.stack_bb.unwrap_or(10.0);
-    let matrix_boards = options.matrix_boards.unwrap_or(200);
+    let matrix_boards = options.matrix_boards.unwrap_or(20000);
     let matrix = load_or_compute_matrix(matrix_boards)?;
     let classes = all_classes();
     let result = solve_hu(stack_bb, &matrix, &classes, 60).map_err(|e| e.to_string())?;
