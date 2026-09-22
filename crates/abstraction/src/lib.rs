@@ -10,6 +10,10 @@
 use std::collections::HashMap;
 use std::fmt;
 
+pub mod equity;
+
+pub use equity::FlopEquityAbstraction;
+
 const RANK_CHARS: &[u8; 13] = b"23456789TJQKA";
 
 fn mk_card(rank: usize, suit: usize) -> u8 {

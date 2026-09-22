@@ -49,6 +49,11 @@ dependencies = [
 [[package]]
 name = "holdem-solver-abstraction"
 version = "0.1.0"
+dependencies = [
+ "holdem-cards",
+ "holdem-equity",
+ "holdem-ranges",
+]
 
 [[package]]
 name = "holdem-solver-cli"

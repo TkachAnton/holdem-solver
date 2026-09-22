@@ -6,3 +6,8 @@ license = "MIT"
 rust-version = "1.75"
 
 [dependencies]
+holdem-equity = { path = "../equity" }
+holdem-ranges = { path = "../ranges" }
+
+[dev-dependencies]
+holdem-cards = { path = "../cards" }
