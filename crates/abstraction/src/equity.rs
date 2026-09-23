@@ -1,4 +1,5 @@
-//! Эквити-уточнение флоп-бакетов (T3.1 v2, сессия 11, D-017).
+//! Эквити-уточнение флоп-бакетов (T3.1 v2, сессия 11, D-017) и общее
+//! якорное ядро для эквити-слоя улиц (сессия 12, D-018).
 //!
 //! Поверх детерминированных feature-бакетов v1 строится эквити-слой: для
 //! каждого класса флопа считается точное эквити героя в якорных матчапах
@@ -8,10 +9,15 @@
 //! `бакет_v1 * эквити_группы + группа`, группа — взвешенный квантиль
 //! агрегатного скора. RNG и сидов нет: детерминизм структурный.
 //!
+//! Якорное ядро (ANCHORS, инстанцирование рук, взвешенные статистики,
+//! квантили) опубликовано как pub(crate) и переиспользуется эквити-слоем
+//! тёрна и ривера (crate::street_equity): одни и те же шесть якорей на
+//! всех улицах — свойство D-017; расхождение копиями исключено by design.
+//!
 //! Стоимость полного прохода: 1755 классов x 6 якорей x 990 x 2 оценки ~
-//! 21 млн оценок — секунды в release (бенчмарк T3.0), непригодно для
-//! debug-тестов: полный прогон вынесен в `#[ignore]` release-тест.
-//! v1 (`lib.rs`) не меняется: эквити-режим живёт поверх него.
+//! 21 млн оценок — ~123 с в release (замер сессии 11, AI_LOG); полный
+//! прогон вынесен в `#[ignore]` release-тест. v1 (`lib.rs`) не меняется:
+//! эквити-режим живёт поверх него.
 
 use crate::{
     flop_class_of_cards, flop_classes, fnv1a64, granularity_tag, FlopAbstraction, FlopClass,
@@ -26,26 +32,26 @@ const EQUITY_MODE_TAG: u8 = 0xE0;
 
 /// Рука якоря: паттерн и ранги (0='2' .. 12='A', как во всём крейте).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AnchorHand {
+pub(crate) enum AnchorHand {
     Pair(usize),
     Suited(usize, usize),
     Offsuit(usize, usize),
 }
 
-/// Якорный матчап «герой против злодея» на представителе класса флопа.
+/// Якорный матчуп «герой против злодея» на представителе класса.
 #[derive(Debug, Clone, Copy)]
-struct Anchor {
-    name: &'static str,
-    role: &'static str,
-    hero: AnchorHand,
-    villain: AnchorHand,
+pub(crate) struct Anchor {
+    pub(crate) name: &'static str,
+    pub(crate) role: &'static str,
+    pub(crate) hero: AnchorHand,
+    pub(crate) villain: AnchorHand,
 }
 
 /// Шесть якорей — шесть покерных реальностей (D-017): доминация старших
 /// пар, пара против оверкарт, коннекторы-дро, suited-бродвей, малая пара,
 /// средний пояс. Роли не дублируют друг друга: дубль смещал бы агрегат
 /// двойным весом, а не добавлял информацию.
-const ANCHORS: [Anchor; 6] = [
+pub(crate) const ANCHORS: [Anchor; 6] = [
     Anchor {
         name: "AA vs KK",
         role: "доминация старших пар: сеты, коллизии A/K",
@@ -84,7 +90,7 @@ const ANCHORS: [Anchor; 6] = [
     },
 ];
 
-const ANCHOR_COUNT: usize = ANCHORS.len();
+pub(crate) const ANCHOR_COUNT: usize = ANCHORS.len();
 
 /// Число конкретных флопов в классе: trips/monotone = C(4,3) = 4;
 /// paired и two-tone = C(4,2)*2 = 12; rainbow = 4*3*2 = 24.
@@ -101,7 +107,7 @@ fn class_multiplicity(class: &FlopClass) -> u64 {
     }
 }
 
-fn used_cards(rep: &[u8; 3]) -> [bool; 52] {
+fn used_cards(rep: &[u8]) -> [bool; 52] {
     let mut used = [false; 52];
     for &card in rep {
         used[card as usize] = true;
@@ -110,12 +116,13 @@ fn used_cards(rep: &[u8; 3]) -> [bool; 52] {
 }
 
 /// Детерминированное инстанцирование руки относительно занятых карт.
-/// Пара: первые две свободные карты ранга — недоступна только на трипсе
-/// своего ранга. Suited: масть борда в приоритете (флеш-сигнал), затем
-/// остальные; три карты борда блокируют максимум три масти из четырёх,
-/// поэтому suited-рука инстанцируема на любом флопе. Offsuit: первые
-/// свободные карты разных мастей.
-fn instantiate(hand: AnchorHand, used: &[bool; 52], rep: &[u8; 3]) -> Option<[u8; 2]> {
+/// Пара: первые две свободные карты ранга (на флопе недоступна только на
+/// трипсе своего ранга; на 4/5-картных бордах блокировок больше —
+/// недоступность возвращает None и обрабатывается агрегатом). Suited:
+/// масть борда в приоритете (флеш-сигнал), затем остальные — на флопе
+/// инстанцируема всегда, на улицах может быть недоступна. Offsuit:
+/// первые свободные карты разных мастей.
+fn instantiate(hand: AnchorHand, used: &[bool; 52], rep: &[u8]) -> Option<[u8; 2]> {
     match hand {
         AnchorHand::Pair(rank) => {
             let mut cards = [0u8; 2];
@@ -171,32 +178,45 @@ fn instantiate(hand: AnchorHand, used: &[bool; 52], rep: &[u8; 3]) -> Option<[u8
     }
 }
 
-/// Руки якоря на представителе класса. None — якорь не инстанцируется
-/// (в этом наборе — только пара ранга трипса борда; offsuit-злодей AKo
-/// не встречает A/K в руках героев, а 3+2 занятых карт мало, чтобы
-/// заблокировать все пары мастей).
-fn anchor_hands_on(anchor: &Anchor, class: &FlopClass) -> Option<([u8; 2], [u8; 2])> {
-    let board_used = used_cards(&class.rep);
-    let hero = instantiate(anchor.hero, &board_used, &class.rep)?;
+/// Руки якоря на борде-представителе (3..5 карт). None — якорь не
+/// инстанцируется. `rep` — ровно карты борда, без паддинга.
+/// инстанцируется: на флопе это только пара ранга трипса, на улицах
+/// набор блокировок богаче (квады и т.п.) и проверяется кодом, а не
+/// перенесённым правилом.
+pub(crate) fn anchor_hands_on_rep(anchor: &Anchor, rep: &[u8]) -> Option<([u8; 2], [u8; 2])> {
+    let board_used = used_cards(rep);
+    let hero = instantiate(anchor.hero, &board_used, rep)?;
     let mut all_used = board_used;
     all_used[hero[0] as usize] = true;
     all_used[hero[1] as usize] = true;
-    let villain = instantiate(anchor.villain, &all_used, &class.rep)?;
+    let villain = instantiate(anchor.villain, &all_used, rep)?;
     Some((hero, villain))
 }
 
-/// Точное эквити героя якоря на представителе класса (shares[0]).
-fn anchor_equity_on_class(anchor: &Anchor, class: &FlopClass) -> Result<Option<f64>, String> {
-    let Some((hero, villain)) = anchor_hands_on(anchor, class) else {
+#[cfg(test)]
+fn anchor_hands_on(anchor: &Anchor, class: &FlopClass) -> Option<([u8; 2], [u8; 2])> {
+    anchor_hands_on_rep(anchor, &class.rep)
+}
+
+/// Точное эквити героя якоря на борде-представителе (shares[0]).
+/// `rep` — ровно карты борда: без паддинга 0xFF из [u8; 5] классов улиц
+/// Ривер даёт дискретные {0, 0.5, 1} — свойство полного борда.
+pub(crate) fn anchor_equity_on_rep(anchor: &Anchor, rep: &[u8]) -> Result<Option<f64>, String> {
+    let Some((hero, villain)) = anchor_hands_on_rep(anchor, rep) else {
         return Ok(None);
     };
     let hands = [
         Combo::new(hero[0], hero[1])?,
         Combo::new(villain[0], villain[1])?,
     ];
-    let board = class.rep.to_vec();
+    let board = rep.to_vec();
     let result = exact_profile_equity(&hands, &[0, 1], &board)?;
     Ok(Some(result.shares[0]))
+}
+
+#[cfg(test)]
+fn anchor_equity_on_class(anchor: &Anchor, class: &FlopClass) -> Result<Option<f64>, String> {
+    anchor_equity_on_rep(anchor, &class.rep)
 }
 
 fn compute_anchor_equities(
@@ -206,7 +226,7 @@ fn compute_anchor_equities(
     for class in classes {
         let mut row = [None; ANCHOR_COUNT];
         for (a, anchor) in ANCHORS.iter().enumerate() {
-            row[a] = anchor_equity_on_class(anchor, class)?;
+            row[a] = anchor_equity_on_rep(anchor, &class.rep)?;
         }
         equities.push(row);
     }
@@ -214,48 +234,51 @@ fn compute_anchor_equities(
 }
 
 #[derive(Debug, Clone, Copy)]
-struct AnchorStats {
-    mean: f64,
-    std: f64,
-    weight: f64,
-    available: usize,
+pub(crate) struct AnchorStats {
+    pub(crate) mean: f64,
+    pub(crate) std: f64,
+    pub(crate) weight: f64,
+    pub(crate) available: usize,
 }
 
-/// Взвешенные кратностями флопов среднее и стандартное отклонение
-/// каждого якоря по переданным классам.
-fn anchor_stats(
-    classes: &[FlopClass],
+/// Взвешенные среднее и стандартное отклонение каждого якоря по
+/// переданным эквити. Ядро, общее для всех улиц: веса передаются явно
+/// (флоп — кратности классов флопов, улицы — multiplicity классов
+/// бордов).
+pub(crate) fn anchor_stats_from_weights(
+    weights: &[u64],
     equities: &[[Option<f64>; ANCHOR_COUNT]],
 ) -> Vec<AnchorStats> {
+    debug_assert_eq!(weights.len(), equities.len());
     let mut sums = vec![0.0; ANCHOR_COUNT];
-    let mut weights = vec![0.0; ANCHOR_COUNT];
+    let mut totals = vec![0.0; ANCHOR_COUNT];
     let mut available = vec![0usize; ANCHOR_COUNT];
-    for (i, class) in classes.iter().enumerate() {
-        let weight = class_multiplicity(class) as f64;
+    for (i, row) in equities.iter().enumerate() {
+        let weight = weights[i] as f64;
         for a in 0..ANCHOR_COUNT {
-            if let Some(equity) = equities[i][a] {
+            if let Some(equity) = row[a] {
                 sums[a] += weight * equity;
-                weights[a] += weight;
+                totals[a] += weight;
                 available[a] += 1;
             }
         }
     }
     let mut stats: Vec<AnchorStats> = (0..ANCHOR_COUNT)
         .map(|a| AnchorStats {
-            mean: if weights[a] > 0.0 {
-                sums[a] / weights[a]
+            mean: if totals[a] > 0.0 {
+                sums[a] / totals[a]
             } else {
                 0.0
             },
             std: 0.0,
-            weight: weights[a],
+            weight: totals[a],
             available: available[a],
         })
         .collect();
-    for (i, class) in classes.iter().enumerate() {
-        let weight = class_multiplicity(class) as f64;
+    for (i, row) in equities.iter().enumerate() {
+        let weight = weights[i] as f64;
         for a in 0..ANCHOR_COUNT {
-            if let Some(equity) = equities[i][a] {
+            if let Some(equity) = row[a] {
                 let delta = equity - stats[a].mean;
                 stats[a].std += weight * delta * delta;
             }
@@ -270,7 +293,10 @@ fn anchor_stats(
 }
 
 /// Агрегатный скор класса: среднее z-оценок доступных якорей.
-fn aggregate_scores(equities: &[[Option<f64>; ANCHOR_COUNT]], stats: &[AnchorStats]) -> Vec<f64> {
+pub(crate) fn aggregate_scores(
+    equities: &[[Option<f64>; ANCHOR_COUNT]],
+    stats: &[AnchorStats],
+) -> Vec<f64> {
     equities
         .iter()
         .map(|row| {
@@ -296,17 +322,22 @@ fn aggregate_scores(equities: &[[Option<f64>; ANCHOR_COUNT]], stats: &[AnchorSta
 
 /// Взвешенные квантильные группы: классы сортируются по скору, граница
 /// группы — доля суммарного веса. Порогов из памяти нет (D-013): границы
-/// выводятся из фактического распределения.
-fn quantile_groups(classes: &[FlopClass], scores: &[f64], groups: usize) -> Vec<usize> {
-    let mut order: Vec<usize> = (0..classes.len()).collect();
+/// выводятся из фактического распределения. Ядро с явными весами.
+pub(crate) fn quantile_groups_from_weights(
+    weights: &[u64],
+    scores: &[f64],
+    groups: usize,
+) -> Vec<usize> {
+    debug_assert_eq!(weights.len(), scores.len());
+    let mut order: Vec<usize> = (0..weights.len()).collect();
     order.sort_by(|&a, &b| scores[a].total_cmp(&scores[b]).then(a.cmp(&b)));
-    let total: f64 = classes.iter().map(class_multiplicity).sum::<u64>() as f64;
-    let mut out = vec![0usize; classes.len()];
+    let total: f64 = weights.iter().sum::<u64>() as f64;
+    let mut out = vec![0usize; weights.len()];
     let mut cumulative = 0.0f64;
     for &index in &order {
         let group = ((cumulative / total) * groups as f64).floor() as usize;
         out[index] = group.min(groups - 1);
-        cumulative += class_multiplicity(&classes[index]) as f64;
+        cumulative += weights[index] as f64;
     }
     out
 }
@@ -346,7 +377,7 @@ pub struct FlopEquityAbstraction {
 }
 
 impl FlopEquityAbstraction {
-    /// Полный проход по всем 1755 классам: секунды в release.
+    /// Полный проход по всем 1755 классам: секунды-минуты в release.
     pub fn new(granularity: Granularity, equity_groups: usize) -> Result<Self, String> {
         let classes = flop_classes();
         Self::from_class_slice(granularity, equity_groups, &classes)
@@ -388,9 +419,10 @@ impl FlopEquityAbstraction {
             ));
         }
         let base = FlopAbstraction::new(granularity);
-        let stats = anchor_stats(classes, &equities);
+        let weights: Vec<u64> = classes.iter().map(class_multiplicity).collect();
+        let stats = anchor_stats_from_weights(&weights, &equities);
         let scores = aggregate_scores(&equities, &stats);
-        let groups = quantile_groups(classes, &scores, equity_groups);
+        let groups = quantile_groups_from_weights(&weights, &scores, equity_groups);
         let mut buckets = Vec::with_capacity(classes.len());
         for (i, class) in classes.iter().enumerate() {
             let base_bucket = base
@@ -398,7 +430,6 @@ impl FlopEquityAbstraction {
                 .ok_or_else(|| format!("v1 bucket missing for class index {}", class.index))?;
             buckets.push(base_bucket * equity_groups + groups[i]);
         }
-        let weights: Vec<u64> = classes.iter().map(class_multiplicity).collect();
         let max_bucket = buckets.iter().copied().max().unwrap_or(0);
         let mut seen = vec![false; max_bucket + 1];
         for &bucket in &buckets {
@@ -494,8 +525,7 @@ impl FlopEquityAbstraction {
     }
 
     /// Бакет по трём конкретным картам флопа. Осмыслен для абстракции,
-    /// построенной по всем классам (`new`): срезы из тестов не покрывают
-    /// полную нумерацию классов.
+    /// построенной по всем классам (`new`).
     pub fn bucket_of_cards(&self, cards: &[u8]) -> Option<usize> {
         let class = flop_class_of_cards(cards)?;
         self.buckets.get(class.index).copied()
@@ -609,7 +639,7 @@ mod tests {
     fn anchor_equity_is_a_share() {
         let classes = flop_classes();
         // Срез секций без блокировок якорей: трипс 555 (4), парный 322 (13),
-        // монотонный AKQ (329); блокирующие трипсы 222/AAA — ниже, отдельными правилами.
+        // монотонный AKQ (329); блокирующие трипсы 222/AAA — ниже.
         for &index in &[4usize, 13, 329] {
             let class = &classes[index];
             for anchor in &ANCHORS {
@@ -718,6 +748,29 @@ mod tests {
     }
 
     #[test]
+    fn v1_fingerprints_are_pinned() {
+        // Регрессионные пины из зафиксированных прогонов (не из памяти):
+        // fine — смок сессии 10 (AI_LOG); coarse — base_fingerprint
+        // equity-смока сессии 11 (AI_LOG). Medium нигде не зафиксирован —
+        // печатается для закрепления фактом (следующий коммит).
+        let coarse = FlopAbstraction::new(Granularity::Coarse);
+        let medium = FlopAbstraction::new(Granularity::Medium);
+        let fine = FlopAbstraction::new(Granularity::Fine);
+        assert_eq!(
+            format!("{:#018x}", coarse.fingerprint()),
+            "0xdce5e3a95475acb5"
+        );
+        assert_eq!(
+            format!("{:#018x}", medium.fingerprint()),
+            "0x97ad8be3d6155afe"
+        );
+        assert_eq!(
+            format!("{:#018x}", fine.fingerprint()),
+            "0x8fb68ef5db8dbe5b"
+        );
+    }
+
+    #[test]
     #[ignore] // полный проход: cargo test -p holdem-solver-abstraction --release -- --ignored --nocapture
     fn full_pass_release_reference() {
         let started = std::time::Instant::now();
@@ -738,6 +791,18 @@ mod tests {
             assert_eq!(first.fingerprint(), second.fingerprint());
             assert_eq!(first.histogram(), second.histogram());
             assert_eq!(first.flop_histogram(), second.flop_histogram());
+            // Регрессионные пины (AI_LOG, сессия 11): гейт рефакторинга
+            // D-018 — ядро pub(crate) не должно менять ни бит математики.
+            let expected = match granularity {
+                Granularity::Coarse => 0x4d35_c0dc_dc9f_0cf8_u64,
+                Granularity::Medium => 0x2744_bcce_b148_074a_u64,
+                Granularity::Fine => 0x796a_6d09_a515_ba0f_u64,
+            };
+            assert_eq!(
+                first.fingerprint(),
+                expected,
+                "флоп-эквити fingerprint дрейфовал после рефакторинга"
+            );
             let base_used = FlopAbstraction::new(granularity).used_buckets();
             assert!(first.used_buckets() >= base_used);
             assert!(first.used_buckets() <= base_used * 4);

@@ -4,7 +4,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use holdem_solver_abstraction::{FlopAbstraction, FlopEquityAbstraction, Granularity};
+use holdem_solver_abstraction::{
+    FlopAbstraction, FlopEquityAbstraction, Granularity, Street, StreetAbstraction,
+    StreetEquityAbstraction,
+};
 use holdem_solver_core::{MultiwayBatchJobConfig, MultiwayBatchJobStore, MultiwayHoldemSpotJob};
 use holdem_solver_icm::{all_in_bubble_factor, icm_equity, marginal_bubble_factor};
 use holdem_solver_pushfold::{all_classes, solve_hu, EquityMatrix, PushFoldResult};
@@ -40,7 +43,7 @@ struct CommandResult {
 }
 
 fn usage() -> &'static str {
-    "Usage:\n  holdem-solver validate --job JOB.json [--json]\n  holdem-solver solve --job JOB.json --output RESULT.json [--job-dir DIR] [--iterations N] [--utility-samples N] [--job-id ID] [--json]\n  holdem-solver icm --stacks S1,S2,... --payouts P1,P2,... [--hero INDEX] [--villain INDEX] [--delta N] [--json]\n  holdem-solver pushfold [--stack N] [--matrix-boards N] [--output RESULT.json] [--json]\n\nCommands:\n  validate  Parse the JSON job, validate history, and build the configured tree.\n  solve     Run or resume a persistent arena job and write a JSON spot result.\n  icm       Compute exact ICM equity and bubble factors for stacks and payouts.\n  pushfold  Solve heads-up push/fold for a given effective stack.\n  flop-clusters  Deterministic flop clustering report (1755 classes); --equity adds exact equity refinement (full pass, minutes).\n\nOutput:\n  --json    Emit one machine-readable JSON success or error envelope."
+    "Usage:\n  holdem-solver validate --job JOB.json [--json]\n  holdem-solver solve --job JOB.json --output RESULT.json [--job-dir DIR] [--iterations N] [--utility-samples N] [--job-id ID] [--json]\n  holdem-solver icm --stacks S1,S2,... --payouts P1,P2,... [--hero INDEX] [--villain INDEX] [--delta N] [--json]\n  holdem-solver pushfold [--stack N] [--matrix-boards N] [--output RESULT.json] [--json]\n\nCommands:\n  validate  Parse the JSON job, validate history, and build the configured tree.\n  solve     Run or resume a persistent arena job and write a JSON spot result.\n  icm       Compute exact ICM equity and bubble factors for stacks and payouts.\n  pushfold  Solve heads-up push/fold for a given effective stack.\n  flop-clusters  Deterministic flop clustering report (1755 classes); --equity adds exact equity refinement (full pass, minutes).\n  turn-clusters  Deterministic turn clustering report; --equity adds exact equity refinement (~1 min release).\n  river-clusters  Deterministic river clustering report; --equity adds exact equity refinement (~15 s release).\n\nOutput:\n  --json    Emit one machine-readable JSON success or error envelope."
 }
 
 fn main() {
@@ -84,6 +87,8 @@ fn run() -> Result<CommandResult, String> {
         "icm" => icm_command(options),
         "pushfold" => pushfold_command(options),
         "flop-clusters" => flop_clusters_command(options),
+        "turn-clusters" => turn_clusters_command(options),
+        "river-clusters" => river_clusters_command(options),
         _ => Err(format!("unknown command: {}", options.command)),
     }
 }
@@ -477,6 +482,8 @@ fn parse_args() -> Result<CliOptions, String> {
         "icm" => parse_icm_args(&arguments),
         "pushfold" => parse_pushfold_args(&arguments),
         "flop-clusters" => parse_flop_clusters_args(&arguments),
+        "turn-clusters" => parse_street_clusters_args(&arguments, "turn-clusters"),
+        "river-clusters" => parse_street_clusters_args(&arguments, "river-clusters"),
         _ => Err(format!("unknown command: {command}")),
     }
 }
@@ -861,6 +868,204 @@ fn parse_flop_clusters_args(arguments: &[String]) -> Result<CliOptions, String> 
     }
     Ok(CliOptions {
         command: "flop-clusters".to_string(),
+        job_path: PathBuf::new(),
+        output_path: None,
+        job_directory: None,
+        iterations: None,
+        utility_samples: 0,
+        job_id: None,
+        stack_bb: None,
+        matrix_boards: None,
+        stacks: None,
+        payouts: None,
+        hero: None,
+        villain: None,
+        delta: None,
+        granularity,
+        equity,
+        equity_groups,
+    })
+}
+
+fn turn_clusters_command(options: CliOptions) -> Result<CommandResult, String> {
+    street_clusters_command(options, Street::Turn)
+}
+
+fn river_clusters_command(options: CliOptions) -> Result<CommandResult, String> {
+    street_clusters_command(options, Street::River)
+}
+
+// Street clustering report (T3.1, сессия 12, D-018): зеркало flop-clusters
+// для тёрна (4 карты) и ривера (5 карт).
+fn street_clusters_command(options: CliOptions, street: Street) -> Result<CommandResult, String> {
+    let command_name = match street {
+        Street::Turn => "turn-clusters",
+        Street::River => "river-clusters",
+    };
+    let granularity = match options.granularity.as_deref() {
+        None => Granularity::Medium,
+        Some("coarse") => Granularity::Coarse,
+        Some("medium") => Granularity::Medium,
+        Some("fine") => Granularity::Fine,
+        Some(other) => return Err(format!("unknown granularity: {other}")),
+    };
+    if options.equity_groups.is_some() && !options.equity {
+        return Err("--equity-groups requires --equity".to_string());
+    }
+    let equity_groups = options.equity_groups.unwrap_or(4);
+    if !options.equity {
+        // v1 (D-018): структурные бакеты канонических классов улицы.
+        let started = std::time::Instant::now();
+        let abstraction = StreetAbstraction::new(street, granularity);
+        let elapsed = started.elapsed().as_secs_f64();
+        let histogram = abstraction.histogram();
+        let mut human_lines = vec![
+            format!("street={street}"),
+            format!("board_classes={}", abstraction.class_count()),
+            format!("granularity={granularity}"),
+            format!("used_buckets={}", abstraction.used_buckets()),
+            format!("fingerprint={:#018x}", abstraction.fingerprint()),
+            format!("total_boards={}", abstraction.total_boards()),
+            format!("elapsed_seconds={elapsed:.1}"),
+            "top_buckets:".to_string(),
+        ];
+        for (bucket, boards) in histogram.iter().take(10) {
+            human_lines.push(format!("  bucket={bucket} boards={boards}"));
+        }
+        let buckets: Vec<Value> = histogram
+            .iter()
+            .map(|(bucket, boards)| json!({ "bucket": bucket, "boards": boards }))
+            .collect();
+        return Ok(CommandResult {
+            human_lines,
+            json: json!({
+                "ok": true,
+                "command": command_name,
+                "data": {
+                    "street": format!("{street}"),
+                    "board_classes": abstraction.class_count(),
+                    "granularity": format!("{granularity}"),
+                    "equity": false,
+                    "used_buckets": abstraction.used_buckets(),
+                    "fingerprint": abstraction.fingerprint(),
+                    "total_boards": abstraction.total_boards(),
+                    "elapsed_seconds": elapsed,
+                    "buckets": buckets,
+                }
+            }),
+        });
+    }
+    // v2 (D-018): точное эквити-уточнение, те же 6 якорей, что у флопа.
+    // Ривер-эквити дискретно {0, 0.5, 1} — структурное свойство, не баг.
+    let started = std::time::Instant::now();
+    let abstraction = StreetEquityAbstraction::new(street, granularity, equity_groups)?;
+    let elapsed = started.elapsed().as_secs_f64();
+    let histogram = abstraction.board_histogram();
+    let mut human_lines = vec![
+        format!("street={street}"),
+        format!("board_classes={}", abstraction.class_count()),
+        format!("granularity={granularity}"),
+        format!("equity_groups={}", abstraction.equity_groups()),
+        format!("anchors={}", abstraction.anchor_count()),
+        format!("used_buckets={}", abstraction.used_buckets()),
+        format!("fingerprint={:#018x}", abstraction.fingerprint()),
+        format!("base_fingerprint={:#018x}", abstraction.base_fingerprint()),
+        format!("total_boards={}", abstraction.total_boards()),
+        format!("elapsed_seconds={elapsed:.1}"),
+        "anchors:".to_string(),
+    ];
+    for anchor in 0..abstraction.anchor_count() {
+        human_lines.push(format!(
+            "  {} available={} mean={:.4} std={:.4}",
+            abstraction.anchor_name(anchor).unwrap_or("?"),
+            abstraction.anchor_available_classes(anchor).unwrap_or(0),
+            abstraction.anchor_mean(anchor).unwrap_or(0.0),
+            abstraction.anchor_std(anchor).unwrap_or(0.0),
+        ));
+    }
+    human_lines.push("top_buckets:".to_string());
+    for (bucket, boards) in histogram.iter().take(10) {
+        human_lines.push(format!("  bucket={bucket} boards={boards}"));
+    }
+    let buckets: Vec<Value> = histogram
+        .iter()
+        .map(|(bucket, boards)| json!({ "bucket": bucket, "boards": boards }))
+        .collect();
+    let anchors: Vec<Value> = (0..abstraction.anchor_count())
+        .map(|anchor| {
+            json!({
+                "name": abstraction.anchor_name(anchor),
+                "role": abstraction.anchor_role(anchor),
+                "available_classes": abstraction.anchor_available_classes(anchor),
+                "mean": abstraction.anchor_mean(anchor),
+                "std": abstraction.anchor_std(anchor),
+            })
+        })
+        .collect();
+    Ok(CommandResult {
+        human_lines,
+        json: json!({
+            "ok": true,
+            "command": command_name,
+            "data": {
+                "street": format!("{street}"),
+                "board_classes": abstraction.class_count(),
+                "granularity": format!("{granularity}"),
+                "equity": true,
+                "equity_groups": abstraction.equity_groups(),
+                "anchors": anchors,
+                "used_buckets": abstraction.used_buckets(),
+                "fingerprint": abstraction.fingerprint(),
+                "base_fingerprint": abstraction.base_fingerprint(),
+                "total_boards": abstraction.total_boards(),
+                "elapsed_seconds": elapsed,
+                "buckets": buckets,
+            }
+        }),
+    })
+}
+
+fn parse_street_clusters_args(arguments: &[String], command: &str) -> Result<CliOptions, String> {
+    let mut granularity: Option<String> = None;
+    let mut equity = false;
+    let mut equity_groups: Option<usize> = None;
+    let mut index = 1;
+    while index < arguments.len() {
+        let flag = &arguments[index];
+        match flag.as_str() {
+            "--granularity" => {
+                index += 1;
+                granularity = Some(
+                    arguments
+                        .get(index)
+                        .ok_or_else(|| "missing value for --granularity".to_string())?
+                        .clone(),
+                );
+            }
+            "--equity" => {
+                equity = true;
+            }
+            "--equity-groups" => {
+                index += 1;
+                let value = arguments
+                    .get(index)
+                    .ok_or_else(|| "missing value for --equity-groups".to_string())?;
+                let parsed: usize = value
+                    .parse()
+                    .map_err(|_| format!("invalid --equity-groups value: {value}"))?;
+                equity_groups = Some(parsed);
+            }
+            "--json" => {}
+            "--help" | "-h" => {
+                println!("{}", usage());
+                std::process::exit(0);
+            }
+            other => return Err(format!("unknown option: {other}")),
+        }
+        index += 1;
+    }
+    Ok(CliOptions {
+        command: command.to_string(),
         job_path: PathBuf::new(),
         output_path: None,
         job_directory: None,

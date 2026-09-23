@@ -14,6 +14,14 @@ pub mod equity;
 
 pub use equity::FlopEquityAbstraction;
 
+pub mod street;
+
+pub use street::{Street, StreetAbstraction, StreetClass};
+
+pub mod street_equity;
+
+pub use street_equity::StreetEquityAbstraction;
+
 const RANK_CHARS: &[u8; 13] = b"23456789TJQKA";
 
 fn mk_card(rank: usize, suit: usize) -> u8 {
