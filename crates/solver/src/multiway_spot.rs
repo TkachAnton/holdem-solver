@@ -56,6 +56,12 @@ pub struct MultiwayHoldemSpotConfig {
     pub max_private_attempts: usize,
     pub worker_count: usize,
     pub reduction_batch_size: usize,
+    /// Спека абстракции карт (T3.2, D-019): None — точный режим,
+    /// без трансформа дерева (байт-идентичное прежнее поведение).
+    pub card_abstraction: Option<crate::card_abstraction::CardAbstractionSpec>,
+    /// Число сэмплов дилов для MC-оценки блокировки представителей
+    /// (D-019); 0 — оценку не считать (результат без блока blocking).
+    pub blocking_samples: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -95,6 +101,10 @@ pub struct MultiwayHoldemSpotResult {
     /// terminal}`. Cards use the shared `rank * 4 + suit` encoding and
     /// actions reuse the `ActionExport` shape of strategy reports.
     pub tree_index: Vec<serde_json::Value>,
+    /// Отчёт применённой абстракции карт (D-019): None — точный режим.
+    pub card_abstraction: Option<crate::card_abstraction::CardAbstractionReport>,
+    /// MC-оценка блокировки представителей (D-019): None — не считалась.
+    pub blocking_estimate: Option<crate::card_abstraction::BlockingEstimate>,
 }
 
 #[derive(Debug, Serialize)]
@@ -105,6 +115,31 @@ struct JsonMultiwayHoldemSpotResult {
     strategy_report: serde_json::Value,
     hero: JsonMultiwayHoldemSpotHeroReport,
     tree_index: Vec<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    card_abstraction: Option<JsonCardAbstractionOutcome>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    blocking: Option<JsonBlockingEstimate>,
+}
+
+#[derive(Debug, Serialize)]
+struct JsonBlockingEstimate {
+    estimate: bool,
+    deals: usize,
+    lost_mass: f64,
+    lost_fraction: f64,
+}
+
+#[derive(Debug, Serialize)]
+struct JsonCardAbstractionOutcome {
+    mode: String,
+    granularity: String,
+    equity_groups: Option<usize>,
+    flop_fingerprint: Option<u64>,
+    turn_fingerprint: Option<u64>,
+    river_fingerprint: Option<u64>,
+    chance_nodes: usize,
+    outcomes_before: u64,
+    outcomes_after: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -170,6 +205,41 @@ impl MultiwayHoldemSpotResult {
             strategy_report,
             hero,
             tree_index: self.tree_index.clone(),
+            card_abstraction: self.card_abstraction.as_ref().map(|report| {
+                JsonCardAbstractionOutcome {
+                    mode: match report.mode {
+                        crate::card_abstraction::CardAbstractionMode::Structural => {
+                            "structural".to_string()
+                        }
+                        crate::card_abstraction::CardAbstractionMode::Equity => {
+                            "equity".to_string()
+                        }
+                    },
+                    granularity: format!("{}", report.granularity),
+                    equity_groups: if report.mode
+                        == crate::card_abstraction::CardAbstractionMode::Equity
+                    {
+                        Some(report.equity_groups)
+                    } else {
+                        None
+                    },
+                    flop_fingerprint: report.flop_fingerprint,
+                    turn_fingerprint: report.turn_fingerprint,
+                    river_fingerprint: report.river_fingerprint,
+                    chance_nodes: report.chance_nodes,
+                    outcomes_before: report.outcomes_before,
+                    outcomes_after: report.outcomes_after,
+                }
+            }),
+            blocking: self
+                .blocking_estimate
+                .as_ref()
+                .map(|estimate| JsonBlockingEstimate {
+                    estimate: true,
+                    deals: estimate.deals,
+                    lost_mass: estimate.lost_mass,
+                    lost_fraction: estimate.lost_fraction,
+                }),
         })
         .map_err(|error| error.to_string())
     }
@@ -313,6 +383,89 @@ impl MultiwayHoldemSpotConfig {
         Ok((tree, solver))
     }
 
+    /// build_solver с применением card_abstraction (T3.2, D-019).
+    /// Возвращает дополнительно отчёт абстракции, когда она включена.
+    pub fn build_solver_with_abstraction(
+        &self,
+    ) -> Result<
+        (
+            GameTree,
+            MultiwayHoldemBatchSolver,
+            Option<(
+                crate::card_abstraction::CardAbstractionReport,
+                Option<crate::card_abstraction::BlockingEstimate>,
+            )>,
+        ),
+        String,
+    > {
+        let tree = self.build_tree()?;
+        match &self.card_abstraction {
+            None => {
+                let solver = self.build_solver_from_tree(tree.clone())?;
+                Ok((tree, solver, None))
+            }
+            Some(spec) => {
+                let (tree, report, groupings) =
+                    crate::card_abstraction::apply_card_abstraction_detailed(tree, spec)?;
+                let blocking = if self.blocking_samples > 0 {
+                    let range_refs: Vec<&WeightedRange> = self.ranges.iter().collect();
+                    Some(crate::card_abstraction::estimate_representative_blocking(
+                        &tree,
+                        &groupings,
+                        &range_refs,
+                        self.dead_cards,
+                        self.seed,
+                        self.blocking_samples,
+                    )?)
+                } else {
+                    None
+                };
+                let solver = self.build_solver_from_tree(tree.clone())?;
+                Ok((tree, solver, Some((report, blocking))))
+            }
+        }
+    }
+
+    fn build_solver_from_tree(&self, tree: GameTree) -> Result<MultiwayHoldemBatchSolver, String> {
+        if tree
+            .leaf_nodes()
+            .any(|node| matches!(node.leaf.as_ref(), Some(LeafKind::RoundComplete)))
+        {
+            return Err(
+                "spot solver tree contains RoundComplete leaves; use Full tree config with terminal streets"
+                    .to_string(),
+            );
+        }
+        let config_fingerprint = if self.config_fingerprint == 0 {
+            multiway_holdem_tree_fingerprint(&tree)
+        } else {
+            self.config_fingerprint
+        };
+        MultiwayHoldemBatchSolver::new(
+            tree.clone(),
+            self.ranges.clone(),
+            self.dead_cards,
+            self.seed,
+            config_fingerprint,
+            self.max_private_attempts,
+        )
+    }
+
+    /// Собирает результат с отчётом применённой абстракции карт (D-019):
+    /// None — точный режим, отчёта нет.
+    pub fn result_from_solver_with_abstraction(
+        &self,
+        tree: &GameTree,
+        solver: &MultiwayHoldemBatchSolver,
+        utility_samples: usize,
+        abstraction_report: Option<crate::card_abstraction::CardAbstractionReport>,
+        blocking_estimate: Option<crate::card_abstraction::BlockingEstimate>,
+    ) -> Result<MultiwayHoldemSpotResult, String> {
+        let mut result = self.result_from_solver(tree, solver, utility_samples)?;
+        result.card_abstraction = abstraction_report;
+        result.blocking_estimate = blocking_estimate;
+        Ok(result)
+    }
     pub fn result_from_solver(
         &self,
         tree: &GameTree,
@@ -331,6 +484,8 @@ impl MultiwayHoldemSpotConfig {
             strategy_report,
             hero,
             tree_index: tree_index_json(tree),
+            card_abstraction: None,
+            blocking_estimate: None,
         })
     }
 
@@ -342,9 +497,22 @@ impl MultiwayHoldemSpotConfig {
         if iterations == 0 {
             return Err("spot iterations must be positive".to_string());
         }
-        let (tree, mut solver) = self.build_solver()?;
+        // T3.2/D-019: абстракция карт применяется к публичному дереву до
+        // передачи в солвер — компиляторы/чекпойнты/отчёты работают с
+        // трансформированным деревом без правок.
+        let (tree, mut solver, abstraction) = self.build_solver_with_abstraction()?;
+        let (abstraction_report, blocking_estimate) = match abstraction {
+            Some((report, blocking)) => (Some(report), blocking),
+            None => (None, None),
+        };
         solver.run_parallel(iterations, self.worker_count, self.reduction_batch_size)?;
-        self.result_from_solver(&tree, &solver, utility_samples)
+        self.result_from_solver_with_abstraction(
+            &tree,
+            &solver,
+            utility_samples,
+            abstraction_report,
+            blocking_estimate,
+        )
     }
 }
 
@@ -622,6 +790,8 @@ mod tests {
             max_private_attempts: 100,
             worker_count: 1,
             reduction_batch_size: 1,
+            card_abstraction: None,
+            blocking_samples: 0,
         }
     }
 
@@ -702,5 +872,112 @@ mod tests {
             value["tree_index"].as_array().unwrap().len(),
             tree.nodes.len()
         );
+    }
+
+    #[test]
+    fn spot_card_abstraction_wiring_structural_report_and_blocking() {
+        use crate::card_abstraction::{CardAbstractionMode, CardAbstractionSpec};
+        use holdem_cards::cards_from_str;
+        use holdem_domain::ActionSizes;
+        use holdem_ranges::parse_range;
+        use holdem_solver_abstraction::Granularity;
+
+        // Трёхместный стол: минимальный валидный multiway-спот.
+        let table = TableConfig {
+            table_size: 3,
+            button: 0,
+            small_blind: 500,
+            big_blind: 1_000,
+            ante: 0,
+            ante_mode: AnteMode::None,
+            stacks: vec![10_000; 3],
+            dead_money: 0,
+        };
+        // Уникальные узкие диапазоны, чтобы сэмплер гарантированно
+        // находил легальные дилы, и карты не пересекались с бордом.
+        let ranges: Vec<WeightedRange> = ["AKs", "KQs", "QQ"]
+            .iter()
+            .map(|text| WeightedRange::from_classes(&parse_range(text).unwrap()))
+            .collect();
+        let mut config = MultiwayHoldemSpotConfig {
+            table,
+            action_history: vec![],
+            ranges,
+            dead_cards: 0,
+            tree: MultiwayHoldemSpotTreeConfig::Full(FullTreeBuildConfig {
+                round: TreeBuildConfig {
+                    action_sizes: ActionSizes {
+                        bet_to: vec![],
+                        raise_to: vec![2_500],
+                        include_all_in: false,
+                    },
+                    abstraction: None,
+                    max_nodes: 50_000,
+                    max_depth: 32,
+                },
+                chance: ChanceConfig {
+                    flop: Some(vec![
+                        ChanceOutcome::new(cards_from_str("As Ks Qs").unwrap(), 1.0),
+                        ChanceOutcome::new(cards_from_str("Ah Kh Qh").unwrap(), 1.0),
+                        ChanceOutcome::new(cards_from_str("2d 7d 9c").unwrap(), 1.0),
+                    ]),
+                    turn: Some(vec![ChanceOutcome::new(cards_from_str("Jh").unwrap(), 1.0)]),
+                    river: Some(vec![ChanceOutcome::new(cards_from_str("3s").unwrap(), 1.0)]),
+                    enumerate_exact: false,
+                    max_outcomes_per_node: 10_000,
+                },
+                postflop_order: vec![1, 2, 0],
+            }),
+            hero_player: 0,
+            hero_hands: combos_for_hand("AKs").unwrap(),
+            hero_label: "AKs".to_string(),
+            seed: 7,
+            config_fingerprint: 0,
+            max_private_attempts: 100,
+            worker_count: 1,
+            reduction_batch_size: 1,
+            card_abstraction: None,
+            blocking_samples: 32,
+        };
+
+        // Точный режим: решаем базовый спот без абстракции.
+        let exact = config.clone().solve(4, 1).unwrap();
+        assert!(exact.card_abstraction.is_none());
+        assert!(exact.blocking_estimate.is_none());
+
+        // Structural: отчёт абстракции + MC-оценка блокировки в проводке.
+        config.card_abstraction = Some(CardAbstractionSpec::structural(Granularity::Coarse));
+        let abstracted = config.clone().solve(4, 1).unwrap();
+        let report = abstracted.card_abstraction.as_ref().unwrap();
+        assert!(matches!(report.mode, CardAbstractionMode::Structural));
+        assert!(report.chance_nodes > 0);
+        // 3 флоп-исхода -> 2 бакета (монотонные близнецы сливаются).
+        assert!(report.outcomes_before > report.outcomes_after);
+        assert!(report.flop_fingerprint.is_some());
+        assert!(report.turn_fingerprint.is_none());
+        assert!(report.river_fingerprint.is_none());
+
+        // Оценка блокировки: посчитана, в границах, детерминирована.
+        let estimate = abstracted.blocking_estimate.as_ref().unwrap();
+        assert!(estimate.deals > 0);
+        assert!((0.0..=1.0).contains(&estimate.lost_fraction));
+        let rerun = config.solve(4, 1).unwrap();
+        let rerun_estimate = rerun.blocking_estimate.as_ref().unwrap();
+        assert_eq!(estimate.deals, rerun_estimate.deals);
+        assert!((estimate.lost_fraction - rerun_estimate.lost_fraction).abs() < 1e-12);
+
+        // JSON: блоки card_abstraction и blocking присутствуют.
+        let json = abstracted.to_json().unwrap();
+        assert!(json.contains("\"card_abstraction\""));
+        assert!(json.contains("\"blocking\""));
+        assert!(json.contains("\"lost_fraction\""));
+
+        // blocking_samples = 0: оценки нет, блока blocking в JSON нет.
+        let mut quiet = config.clone();
+        quiet.blocking_samples = 0;
+        let quiet_result = quiet.solve(4, 1).unwrap();
+        assert!(quiet_result.blocking_estimate.is_none());
+        let quiet_json = quiet_result.to_json().unwrap();
+        assert!(!quiet_json.contains("\"blocking\""));
     }
 }

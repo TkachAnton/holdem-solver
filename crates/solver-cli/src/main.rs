@@ -155,7 +155,10 @@ fn solve_command(options: CliOptions) -> Result<CommandResult, String> {
     });
     let utility_samples = options.utility_samples;
     let store = MultiwayBatchJobStore::new(&job_directory)?;
-    let (tree, fresh_solver) = config.build_solver()?;
+    // T3.2/D-019: публичное дерево абстрагируется ДО солвера; оба
+    // режима идут одним путём — чекпойнты/резюме работают с
+    // трансформированным деревом автоматически.
+    let (tree, fresh_solver, abstraction) = config.build_solver_with_abstraction()?;
     let fresh_config_fingerprint = fresh_solver.checkpoint().config_fingerprint;
     let mut solver = if store.manifest_path().exists() {
         store.resume_solver(
@@ -176,8 +179,23 @@ fn solve_command(options: CliOptions) -> Result<CommandResult, String> {
         max_private_attempts: execution.max_private_attempts,
         keep_checkpoints: execution.keep_checkpoints,
     };
+    // is_fresh фиксируется ДО run_to_target: manifest создаётся внутри
+    // прогона, проверка после него всегда видела бы существующий файл.
+    let is_fresh = !store.manifest_path().exists();
     let manifest = store.run_to_target(&job_id, &mut solver, &job_config)?;
-    let result = config.result_from_solver(&tree, &solver, utility_samples)?;
+    // MC-оценка блокировки: только при свежем прогоне — на resume не
+    // пересчитывается (зависит от дерева/спеки, не от итераций).
+    let blocking = match (&abstraction, is_fresh) {
+        (Some((_, estimate)), true) => estimate.clone(),
+        _ => None,
+    };
+    let result = config.result_from_solver_with_abstraction(
+        &tree,
+        &solver,
+        utility_samples,
+        abstraction.map(|(report, _)| report),
+        blocking,
+    )?;
     write_text_atomically(&output_path, &result.to_json()?)?;
     let status = format!("{:?}", manifest.status);
     Ok(CommandResult {

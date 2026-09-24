@@ -75,6 +75,7 @@ dependencies = [
  "holdem-domain",
  "holdem-ranges",
  "holdem-settlement",
+ "holdem-solver-abstraction",
  "holdem-tree",
  "serde",
  "serde_json",

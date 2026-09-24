@@ -207,8 +207,27 @@ pub struct MultiwayHoldemSpotChanceJson {
     pub river: Vec<MultiwayHoldemSpotChanceOutcomeJson>,
     #[serde(default)]
     pub enumerate_exact: bool,
+    #[serde(default)]
+    pub card_abstraction: Option<CardAbstractionJson>,
     #[serde(default = "default_max_outcomes")]
     pub max_outcomes_per_node: usize,
+}
+
+/// Спека абстракции карт для chance-секции (T3.2, D-019). mode и
+/// granularity обязательны: дефолтного режима нет — «тихий дорогой
+/// сюрприз» исключён by design.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CardAbstractionJson {
+    pub mode: String,
+    pub granularity: String,
+    #[serde(default)]
+    pub equity_groups: Option<usize>,
+    #[serde(default = "default_blocking_samples")]
+    pub blocking_samples: usize,
+}
+
+fn default_blocking_samples() -> usize {
+    128
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -302,6 +321,19 @@ impl MultiwayHoldemSpotJob {
             .map(MultiwayHoldemSpotRangeJson::into_range)
             .collect::<Result<Vec<_>, _>>()?;
         let hero_hands = parse_hero_hands(&self.hero.hand)?;
+        let card_abstraction_spec = self
+            .tree
+            .chance
+            .card_abstraction
+            .clone()
+            .map(CardAbstractionJson::into_spec);
+        let blocking_samples = self
+            .tree
+            .chance
+            .card_abstraction
+            .as_ref()
+            .map(|spec| spec.blocking_samples)
+            .unwrap_or(0);
         let tree = self.tree.into_tree_config()?;
         let execution = self.execution;
         let config = MultiwayHoldemSpotConfig {
@@ -318,9 +350,30 @@ impl MultiwayHoldemSpotJob {
             max_private_attempts: execution.max_private_attempts,
             worker_count: execution.worker_count,
             reduction_batch_size: execution.reduction_batch_size,
+            card_abstraction: card_abstraction_spec,
+            blocking_samples,
         };
         config.validate()?;
         Ok(config)
+    }
+}
+
+use holdem_solver_abstraction::Granularity;
+
+impl CardAbstractionJson {
+    fn into_spec(self) -> crate::card_abstraction::CardAbstractionSpec {
+        let granularity = match self.granularity.as_str() {
+            "coarse" => Granularity::Coarse,
+            "medium" => Granularity::Medium,
+            _ => Granularity::Fine,
+        };
+        match self.mode.as_str() {
+            "equity" => crate::card_abstraction::CardAbstractionSpec::equity(
+                granularity,
+                self.equity_groups.unwrap_or(4),
+            ),
+            _ => crate::card_abstraction::CardAbstractionSpec::structural(granularity),
+        }
     }
 }
 

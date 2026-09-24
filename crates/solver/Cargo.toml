@@ -10,6 +10,7 @@ name = "holdem_solver_core"
 path = "src/lib.rs"
 
 [dependencies]
+holdem-solver-abstraction = { path = "../abstraction" }
 holdem-cards = { path = "../cards" }
 holdem-domain = { path = "../holdem-domain" }
 holdem-ranges = { path = "../ranges" }

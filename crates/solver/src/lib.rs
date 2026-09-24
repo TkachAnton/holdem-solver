@@ -66,6 +66,8 @@ pub use multiway_spot_json::{
     MULTIWAY_HOLDEM_SPOT_SCHEMA_VERSION,
 };
 
+pub mod card_abstraction;
+
 pub type NodeId = usize;
 pub type InfoSetId = u64;
 
