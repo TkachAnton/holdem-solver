@@ -8,7 +8,10 @@ use holdem_solver_abstraction::{
     FlopAbstraction, FlopEquityAbstraction, Granularity, Street, StreetAbstraction,
     StreetEquityAbstraction,
 };
-use holdem_solver_core::{MultiwayBatchJobConfig, MultiwayBatchJobStore, MultiwayHoldemSpotJob};
+use holdem_solver_core::{
+    run_drill, DrillParams, DrillPrompt, MultiwayBatchJobConfig, MultiwayBatchJobStore,
+    MultiwayHoldemSpotJob, DRILL_DEFAULT_HANDS,
+};
 use holdem_solver_icm::{all_in_bubble_factor, icm_equity, marginal_bubble_factor};
 use holdem_solver_pushfold::{all_classes, solve_hu, EquityMatrix, PushFoldResult};
 use serde::{Deserialize, Serialize};
@@ -44,7 +47,7 @@ struct CommandResult {
 }
 
 fn usage() -> &'static str {
-    "Usage:\n  holdem-solver validate --job JOB.json [--json]\n  holdem-solver solve --job JOB.json --output RESULT.json [--job-dir DIR] [--iterations N] [--utility-samples N] [--br-samples N] [--job-id ID] [--json]\n  holdem-solver icm --stacks S1,S2,... --payouts P1,P2,... [--hero INDEX] [--villain INDEX] [--delta N] [--json]\n  holdem-solver pushfold [--stack N] [--matrix-boards N] [--output RESULT.json] [--json]\n\nCommands:\n  validate  Parse the JSON job, validate history, and build the configured tree.\n  solve     Run or resume a persistent arena job and write a JSON spot result.\n  icm       Compute exact ICM equity and bubble factors for stacks and payouts.\n  pushfold  Solve heads-up push/fold for a given effective stack.\n  flop-clusters  Deterministic flop clustering report (1755 classes); --equity adds exact equity refinement (full pass, minutes).\n  turn-clusters  Deterministic turn clustering report; --equity adds exact equity refinement (~1 min release).\n  river-clusters  Deterministic river clustering report; --equity adds exact equity refinement (~15 s release).\n\nOutput:\n  --json    Emit one machine-readable JSON success or error envelope."
+    "Usage:\n  holdem-solver validate --job JOB.json [--json]\n  holdem-solver solve --job JOB.json --output RESULT.json [--job-dir DIR] [--iterations N] [--utility-samples N] [--br-samples N] [--job-id ID] [--json]\n  holdem-solver drill --job JOB.json [--output SESSION.json] [--job-dir DIR] [--iterations N] [--utility-samples N] [--json]\n  holdem-solver icm --stacks S1,S2,... --payouts P1,P2,... [--hero INDEX] [--villain INDEX] [--delta N] [--json]\n  holdem-solver pushfold [--stack N] [--matrix-boards N] [--output RESULT.json] [--json]\n\nCommands:\n  validate  Parse the JSON job, validate history, and build the configured tree.\n  solve     Run or resume a persistent arena job and write a JSON spot result.\n  icm       Compute exact ICM equity and bubble factors for stacks and payouts.\n  pushfold  Solve heads-up push/fold for a given effective stack.\n  flop-clusters  Deterministic flop clustering report (1755 classes); --equity adds exact equity refinement (full pass, minutes).\n  turn-clusters  Deterministic turn clustering report; --equity adds exact equity refinement (~1 min release).\n  river-clusters  Deterministic river clustering report; --equity adds exact equity refinement (~15 s release).\n\nOutput:\n  --json    Emit one machine-readable JSON success or error envelope."
 }
 
 fn main() {
@@ -90,6 +93,7 @@ fn run() -> Result<CommandResult, String> {
         "flop-clusters" => flop_clusters_command(options),
         "turn-clusters" => turn_clusters_command(options),
         "river-clusters" => river_clusters_command(options),
+        "drill" => drill_command(options),
         _ => Err(format!("unknown command: {}", options.command)),
     }
 }
@@ -240,6 +244,167 @@ fn solve_command(options: CliOptions) -> Result<CommandResult, String> {
     })
 }
 
+// ---------------------------------------------------------------------------
+// Drill (T4.3; D-022): REPL дрилла над спот-джобом
+// ---------------------------------------------------------------------------
+
+fn drill_command(options: CliOptions) -> Result<CommandResult, String> {
+    use std::io::{self, BufRead, Write};
+
+    let session_path = options
+        .output_path
+        .clone()
+        .unwrap_or_else(|| options.job_path.with_extension("drill.json"));
+    let json = fs::read_to_string(&options.job_path)
+        .map_err(|error| format!("read job {}: {error}", options.job_path.display()))?;
+    let job = MultiwayHoldemSpotJob::from_json(&json)?;
+    let config = job.clone().into_config()?;
+    let target_iterations = options.iterations.or_else(|| {
+        let configured = job.execution.target_iterations;
+        if configured == 0 {
+            None
+        } else {
+            Some(configured)
+        }
+    });
+    let target_iterations = target_iterations.ok_or_else(|| {
+        "no target iterations configured; use execution.target_iterations or --iterations"
+            .to_string()
+    })?;
+    let job_directory = options
+        .job_directory
+        .clone()
+        .unwrap_or_else(|| session_path.with_extension("job"));
+    let job_id = options.job_id.clone().unwrap_or_else(|| {
+        options
+            .job_path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("drill")
+            .to_string()
+    });
+    let store = MultiwayBatchJobStore::new(&job_directory)?;
+    // T3.2/D-019: единый путь сборки солвера — дрилл работает и поверх
+    // абстрагированного дерева; замер эксплуатируемости не вызывается.
+    let (tree, fresh_solver, _abstraction) = config.build_solver_with_abstraction()?;
+    let fresh_config_fingerprint = fresh_solver.checkpoint().config_fingerprint;
+    let mut solver = if store.manifest_path().exists() {
+        store.resume_solver(
+            tree.clone(),
+            config.ranges.clone(),
+            config.dead_cards,
+            fresh_config_fingerprint,
+        )?
+    } else {
+        fresh_solver
+    };
+    let execution = &job.execution;
+    let job_config = MultiwayBatchJobConfig {
+        target_iterations,
+        worker_count: execution.worker_count,
+        reduction_batch_size: execution.reduction_batch_size,
+        checkpoint_interval: execution.checkpoint_interval,
+        max_private_attempts: execution.max_private_attempts,
+        keep_checkpoints: execution.keep_checkpoints,
+    };
+    let manifest = store.run_to_target(&job_id, &mut solver, &job_config)?;
+    let params = DrillParams {
+        hands: DRILL_DEFAULT_HANDS,
+        ev_samples: options.utility_samples,
+        max_private_attempts: execution.max_private_attempts,
+        seed: execution.seed,
+    };
+    let stdin = io::stdin();
+    let stdout = io::stdout();
+    let session = run_drill(
+        &config,
+        &tree,
+        &solver,
+        &params,
+        &mut |prompt: &DrillPrompt| {
+            {
+                let mut out = stdout.lock();
+                writeln!(
+                    out,
+                    "--- hand {}/{} | {} | board: {} | pot: {} | hero: {} ({})",
+                    prompt.hand_index + 1,
+                    prompt.hands_total,
+                    prompt.street,
+                    prompt.board_text,
+                    prompt.pot,
+                    prompt.hero_label,
+                    prompt.hero_hand_text
+                )
+                .ok();
+                for (index, label) in prompt.action_labels.iter().enumerate() {
+                    writeln!(out, "  [{}] {}", index + 1, label).ok();
+                }
+                write!(out, "action (number, q to quit): ").ok();
+                out.flush().ok();
+            }
+            loop {
+                let mut line = String::new();
+                match stdin.lock().read_line(&mut line) {
+                    Ok(0) => return None,
+                    Ok(_) => {}
+                    Err(_) => return None,
+                }
+                let trimmed = line.trim().trim_start_matches('\u{feff}');
+                if trimmed.eq_ignore_ascii_case("q") || trimmed.eq_ignore_ascii_case("quit") {
+                    return None;
+                }
+                if let Ok(number) = trimmed.parse::<usize>() {
+                    if number >= 1 && number <= prompt.action_labels.len() {
+                        return Some(number - 1);
+                    }
+                }
+                {
+                    let mut out = stdout.lock();
+                    writeln!(
+                        out,
+                        "?? enter a number 1..{} or q",
+                        prompt.action_labels.len()
+                    )
+                    .ok();
+                    out.flush().ok();
+                }
+            }
+        },
+        Some(&session_path),
+    )?;
+    let status = format!("{:?}", manifest.status);
+    let average_loss_bb = session.average_loss_chips / session.big_blind.max(1) as f64;
+    Ok(CommandResult {
+        human_lines: vec![
+            format!("job_id={}", manifest.job_id),
+            format!("status={status}"),
+            format!("completed_iterations={}", manifest.completed_iterations),
+            format!(
+                "drill_hands={}/{}",
+                session.hands_completed, session.hands_total
+            ),
+            format!(
+                "average_loss={:.3} chips ({:.3} bb)",
+                session.average_loss_chips, average_loss_bb
+            ),
+            format!("session={}", session_path.display()),
+        ],
+        json: json!({
+            "ok": true,
+            "command": "drill",
+            "data": {
+                "job_id": manifest.job_id,
+                "status": status,
+                "completed_iterations": manifest.completed_iterations,
+                "hands_completed": session.hands_completed,
+                "hands_total": session.hands_total,
+                "average_loss_chips": session.average_loss_chips,
+                "average_loss_bb": average_loss_bb,
+                "session": session_path,
+            }
+        }),
+    })
+}
 // ---------------------------------------------------------------------------
 // ICM (T1.3; восстановлено в сессии 9 после регрессии f56f046)
 // ---------------------------------------------------------------------------
@@ -514,7 +679,7 @@ fn parse_args() -> Result<CliOptions, String> {
     }
     let command = arguments[0].clone();
     match command.as_str() {
-        "validate" | "solve" => parse_job_args(&arguments, &command),
+        "validate" | "solve" | "drill" => parse_job_args(&arguments, &command),
         "icm" => parse_icm_args(&arguments),
         "pushfold" => parse_pushfold_args(&arguments),
         "flop-clusters" => parse_flop_clusters_args(&arguments),
@@ -581,6 +746,34 @@ fn parse_job_args(arguments: &[String], command: &str) -> Result<CliOptions, Str
         index += 1;
     }
     let job_path = job_path.ok_or_else(|| "missing --job JOB.json".to_string())?;
+    if command == "drill" {
+        let session_path = output_path
+            .clone()
+            .unwrap_or_else(|| job_path.with_extension("drill.json"));
+        if job_directory.is_none() {
+            return Err("drill requires --job-dir DIR (persistent solver storage)".to_string());
+        }
+        return Ok(CliOptions {
+            command: command.to_string(),
+            job_path,
+            output_path: Some(session_path),
+            job_directory,
+            iterations,
+            utility_samples,
+            br_samples: None,
+            job_id,
+            stack_bb: None,
+            matrix_boards: None,
+            stacks: None,
+            payouts: None,
+            hero: None,
+            villain: None,
+            delta: None,
+            granularity: None,
+            equity: false,
+            equity_groups: None,
+        });
+    }
     if command == "validate" && output_path.is_some() {
         return Err("--output is only valid for solve".to_string());
     }

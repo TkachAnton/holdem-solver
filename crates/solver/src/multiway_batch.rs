@@ -1666,6 +1666,125 @@ impl MultiwayHoldemBatchSolver {
         })
     }
 
+    /// T4.3/D-022: легальные действия корня дрилла (порядок = порядок
+    /// детей публичного корня; индексы адресуют детей и инфосеты).
+    pub fn drill_root_actions(&self) -> Result<Vec<Action>, String> {
+        let tree = self.public_arena.tree();
+        let root = tree
+            .node(tree.root)
+            .ok_or_else(|| "public arena tree root is missing".to_string())?;
+        if root.chance.is_some() || root.leaf.is_some() {
+            return Err("drill root must be a hero decision node".to_string());
+        }
+        root.children
+            .iter()
+            .map(|&child| {
+                tree.node(child)
+                    .and_then(|node| node.action_from_parent.clone())
+                    .ok_or_else(|| "drill root child has no incoming action".to_string())
+            })
+            .collect()
+    }
+
+    /// T4.3/D-022: частоты средней стратегии для руки героя в корне;
+    /// непосещённый инфосет — uniform (как в оценках средней).
+    pub fn drill_root_frequencies(
+        &self,
+        hero_player: PlayerId,
+        hero_hand: Combo,
+    ) -> Result<Vec<(Action, f64)>, String> {
+        let actions = self.drill_root_actions()?;
+        let tree = self.public_arena.tree();
+        let key = BatchInfoSetKey {
+            player: hero_player,
+            public_node: tree.root,
+            private_hand: hero_hand,
+        };
+        let frequencies = match self.infosets.get(&key) {
+            Some(entry) => {
+                let strategy = entry.data.average_strategy();
+                if strategy.len() != actions.len() {
+                    return Err(format!(
+                        "drill frequency action count mismatch for player {hero_player}"
+                    ));
+                }
+                strategy
+            }
+            None => vec![1.0 / actions.len() as f64; actions.len()],
+        };
+        Ok(actions.into_iter().zip(frequencies).collect())
+    }
+
+    /// T4.3/D-022: paired conditioned-MC потеря EV одного действия руки
+    /// героя: baseline = средняя везде; forced = действие в корне + средняя
+    /// ниже (evaluate_public_fixed_policy с одноэлементной политикой);
+    /// дилы — sample_conditioned; SE — парный (те же дилы).
+    pub fn drill_hand_outcome(
+        &self,
+        hero_player: PlayerId,
+        hero_hand: Combo,
+        action_index: usize,
+        ev_samples: usize,
+        max_private_attempts: usize,
+    ) -> Result<crate::drill::DrillHandOutcome, String> {
+        if ev_samples == 0 {
+            return Err("drill ev_samples must be positive".to_string());
+        }
+        let action_count = self.drill_root_actions()?.len();
+        if action_index >= action_count {
+            return Err(format!(
+                "drill action index {action_index} is out of range ({action_count} actions)"
+            ));
+        }
+        let mut probe = self.clone();
+        let mut policy = HashMap::new();
+        policy.insert(
+            BatchInfoSetKey {
+                player: hero_player,
+                public_node: probe.public_arena.tree().root,
+                private_hand: hero_hand,
+            },
+            action_index,
+        );
+        let mut loss_mean = 0.0;
+        let mut loss_m2 = 0.0;
+        for sample_index in 0..ev_samples {
+            let sample = probe.private_sampler.sample_conditioned(
+                hero_player,
+                hero_hand,
+                max_private_attempts,
+            )?;
+            let profile = probe.public_arena.profile(sample.hands)?;
+            let baseline =
+                evaluate_public_profile(probe.public_arena.tree(), &profile, &probe.infosets)?
+                    [hero_player];
+            let forced = evaluate_public_fixed_policy(
+                probe.public_arena.tree(),
+                &profile,
+                &probe.infosets,
+                &policy,
+                hero_player,
+                probe.public_arena.tree().root,
+            )?;
+            if !baseline.is_finite() || !forced.is_finite() {
+                return Err("drill evaluation produced a non-finite value".to_string());
+            }
+            update_online_moment(
+                &mut loss_mean,
+                &mut loss_m2,
+                baseline - forced,
+                (sample_index + 1) as f64,
+            );
+        }
+        let (loss_variance, loss_standard_error) = scalar_variance_and_error(loss_m2, ev_samples);
+        Ok(crate::drill::DrillHandOutcome {
+            deals: ev_samples as u64,
+            loss_mean,
+            loss_variance,
+            loss_standard_error,
+        })
+    }
+
     pub fn strategy_report(
         &self,
         utility_samples: usize,

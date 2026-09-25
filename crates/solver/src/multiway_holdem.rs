@@ -233,6 +233,79 @@ impl MultiwayPrivateDealSampler {
         })
     }
 
+    /// T4.3/D-022: взвешенный выбор руки одного игрока по нормированным
+    /// весам его диапазона (для выбора рук дрилла).
+    pub fn sample_hand_for_player(&mut self, player: usize) -> Result<Combo, String> {
+        if player >= self.candidates.len() {
+            return Err(format!(
+                "sampler player {player} is outside the range vector"
+            ));
+        }
+        let index = self.rng.sample_index(&self.probabilities[player]);
+        Ok(self.candidates[player][index].0)
+    }
+
+    /// T4.3/D-022: дил с фиксированной рукой одного игрока; остальные
+    /// сэмплируются по своим вероятностям; конфликт — rejection (как в
+    /// `sample`, но фиксированная рука не перевыбирается).
+    pub fn sample_conditioned(
+        &mut self,
+        player: usize,
+        hand: Combo,
+        max_attempts: usize,
+    ) -> Result<MultiwayPrivateDealSample, String> {
+        if max_attempts == 0 {
+            return Err("max_attempts must be positive".to_string());
+        }
+        if player >= self.candidates.len() {
+            return Err(format!(
+                "sampler player {player} is outside the range vector"
+            ));
+        }
+        if !self.candidates[player]
+            .iter()
+            .any(|(combo, _)| *combo == hand)
+        {
+            return Err(format!(
+                "conditioned hand is not a legal candidate for player {player}"
+            ));
+        }
+        for attempt in 1..=max_attempts {
+            self.total_attempts += 1;
+            let mut used_cards = self.dead_cards;
+            let mut hands = Vec::with_capacity(self.candidates.len());
+            let mut legal = true;
+            for current in 0..self.candidates.len() {
+                if current == player {
+                    if hand.mask() & used_cards != 0 {
+                        legal = false;
+                        break;
+                    }
+                    hands.push(hand);
+                    used_cards |= hand.mask();
+                    continue;
+                }
+                let index = self.rng.sample_index(&self.probabilities[current]);
+                let combo = self.candidates[current][index].0;
+                if combo.mask() & used_cards != 0 {
+                    legal = false;
+                    break;
+                }
+                used_cards |= combo.mask();
+                hands.push(combo);
+            }
+            if legal {
+                return Ok(MultiwayPrivateDealSample {
+                    hands,
+                    attempts: attempt as u64,
+                });
+            }
+        }
+        Err(format!(
+            "could not sample a conditioned multiway private deal within {max_attempts} attempts"
+        ))
+    }
+
     pub fn total_attempts(&self) -> u64 {
         self.total_attempts
     }

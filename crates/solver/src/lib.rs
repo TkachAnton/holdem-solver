@@ -8,12 +8,19 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
+pub mod drill;
 pub mod holdem;
 pub mod multiway;
 pub mod multiway_batch;
 pub mod multiway_holdem;
 pub mod multiway_job;
 pub mod multiway_spot;
+
+pub use drill::{
+    run_drill, DrillFrequency, DrillHandOutcome, DrillHandRecord, DrillParams, DrillPrompt,
+    DrillResponder, DrillSession, DRILL_DEFAULT_HANDS, DRILL_SESSION_SCHEMA_VERSION,
+};
+
 pub mod multiway_spot_json;
 
 pub use holdem::{
