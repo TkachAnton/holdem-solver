@@ -34,9 +34,10 @@ pub use multiway::{
 pub use multiway_batch::{
     multiway_holdem_tree_fingerprint, MultiwayBatchActionReport,
     MultiwayBatchBestResponsePlayerEstimate, MultiwayBatchBestResponseReport,
-    MultiwayBatchConvergenceDiagnostics, MultiwayBatchInfoSetCheckpoint,
-    MultiwayBatchInfoSetReport, MultiwayBatchPlayerConvergence, MultiwayBatchSamplingMetrics,
-    MultiwayBatchStrategyReport, MultiwayBatchUtilityEstimate, MultiwayCompiledProfileCacheMetrics,
+    MultiwayBatchConvergenceDiagnostics, MultiwayBatchExploitabilityPlayerEstimate,
+    MultiwayBatchExploitabilityReport, MultiwayBatchInfoSetCheckpoint, MultiwayBatchInfoSetReport,
+    MultiwayBatchPlayerConvergence, MultiwayBatchSamplingMetrics, MultiwayBatchStrategyReport,
+    MultiwayBatchUtilityEstimate, MultiwayCompiledProfileCacheMetrics,
     MultiwayHoldemBatchCheckpoint, MultiwayHoldemBatchSolver, MultiwayHoldemPublicArena,
     MultiwayHoldemPublicProfile, MULTIWAY_BATCH_RESULT_SCHEMA_VERSION,
 };

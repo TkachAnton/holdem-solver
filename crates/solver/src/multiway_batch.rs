@@ -302,6 +302,38 @@ impl MultiwayBatchBestResponseReport {
     }
 }
 
+/// T4.2/D-021: честная эксплуатируемость — two-pass sampled BR.
+/// Pass 1 накапливает per-инфосет значения действий при омнисциентной
+/// игре ниже узла (смещение поиска — влияет на тесноту вилки, не на
+/// валидность нижней границы); политика = argmax накоплений.
+/// Pass 2 оценивает фиксированную политику на свежих дилax того же
+/// потока сэмплера — несмещённое paired-измерение против средней.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MultiwayBatchExploitabilityPlayerEstimate {
+    pub player: PlayerId,
+    pub samples: u64,
+    /// Paired improvement: фиксированная политика − средняя стратегия.
+    pub improvement: f64,
+    pub improvement_variance: f64,
+    pub improvement_standard_error: f64,
+    /// Paired upper bound: омнисциентный per-deal max − средняя (Йенсен).
+    pub upper_bound: f64,
+    pub upper_bound_variance: f64,
+    pub upper_bound_standard_error: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MultiwayBatchExploitabilityReport {
+    pub player_count: usize,
+    pub players: Vec<MultiwayBatchExploitabilityPlayerEstimate>,
+}
+
+impl MultiwayBatchExploitabilityReport {
+    pub fn to_json(&self) -> Result<String, String> {
+        serde_json::to_string_pretty(self).map_err(|error| error.to_string())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MultiwayBatchInfoSetCheckpoint {
     pub player: PlayerId,
@@ -1504,6 +1536,136 @@ impl MultiwayHoldemBatchSolver {
         })
     }
 
+    /// T4.2/D-021: two-pass sampled BR — честная нижняя граница
+    /// эксплуатируемости и парная верхняя. Поиск — жадный/оптимистичный;
+    /// измерение — несмещённое. Детерминизм: клон сэмплера продолжается
+    /// от текущего состояния — одинаковый солвер даёт одинаковый отчёт
+    /// (в т.ч. после resume).
+    pub fn exploitability_probe(
+        &self,
+        sample_count: usize,
+        max_private_attempts: usize,
+    ) -> Result<MultiwayBatchExploitabilityReport, String> {
+        if sample_count == 0 {
+            return Err("sample_count must be positive".to_string());
+        }
+        let mut probe = self.clone();
+
+        // Pass 1 (поиск): V-накопления per-инфосет.
+        let mut action_values: HashMap<BatchInfoSetKey, Vec<f64>> = HashMap::new();
+        for _ in 0..sample_count {
+            let sample = probe.private_sampler.sample(max_private_attempts)?;
+            let profile = probe.public_arena.profile(sample.hands)?;
+            for player in 0..self.player_count {
+                accumulate_public_best_response(
+                    probe.public_arena.tree(),
+                    &profile,
+                    &probe.infosets,
+                    player,
+                    probe.public_arena.tree().root,
+                    &mut action_values,
+                )?;
+            }
+        }
+        // Политика a*: argmax накопленных значений (без утечки чужих карт).
+        let policy: HashMap<BatchInfoSetKey, usize> = action_values
+            .into_iter()
+            .map(|(key, values)| {
+                let best = values
+                    .iter()
+                    .enumerate()
+                    .max_by(|left, right| {
+                        left.1
+                            .partial_cmp(right.1)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .map(|(index, _)| index)
+                    .unwrap_or(0);
+                (key, best)
+            })
+            .collect();
+
+        // Pass 2 (измерение): свежие дилы того же потока сэмплера.
+        let mut improvement_mean = vec![0.0; self.player_count];
+        let mut improvement_m2 = vec![0.0; self.player_count];
+        let mut upper_mean = vec![0.0; self.player_count];
+        let mut upper_m2 = vec![0.0; self.player_count];
+        for sample_index in 0..sample_count {
+            let sample = probe.private_sampler.sample(max_private_attempts)?;
+            let profile = probe.public_arena.profile(sample.hands)?;
+            let strategy_utility =
+                evaluate_public_profile(probe.public_arena.tree(), &profile, &probe.infosets)?;
+            if strategy_utility.len() != self.player_count
+                || !strategy_utility.iter().all(|value| value.is_finite())
+            {
+                return Err("exploitability probe received invalid strategy utility".to_string());
+            }
+            let count = (sample_index + 1) as f64;
+            for player in 0..self.player_count {
+                let fixed_value = evaluate_public_fixed_policy(
+                    probe.public_arena.tree(),
+                    &profile,
+                    &probe.infosets,
+                    &policy,
+                    player,
+                    probe.public_arena.tree().root,
+                )?;
+                let upper_value = evaluate_public_best_response(
+                    probe.public_arena.tree(),
+                    &profile,
+                    &probe.infosets,
+                    player,
+                    probe.public_arena.tree().root,
+                )?;
+                if !fixed_value.is_finite() || !upper_value.is_finite() {
+                    return Err("exploitability probe produced a non-finite value".to_string());
+                }
+                // Поточечный инвариант: omniscient max >= выпуклая
+                // комбинация тех же значений — структурно, без допуска.
+                if upper_value < fixed_value {
+                    return Err(format!(
+                        "exploitability invariant violated for player {player}: \
+                         upper {upper_value} below fixed-policy {fixed_value}"
+                    ));
+                }
+                update_online_moment(
+                    &mut improvement_mean[player],
+                    &mut improvement_m2[player],
+                    fixed_value - strategy_utility[player],
+                    count,
+                );
+                update_online_moment(
+                    &mut upper_mean[player],
+                    &mut upper_m2[player],
+                    upper_value - strategy_utility[player],
+                    count,
+                );
+            }
+        }
+
+        let mut players = Vec::with_capacity(self.player_count);
+        for player in 0..self.player_count {
+            let (improvement_variance, improvement_standard_error) =
+                scalar_variance_and_error(improvement_m2[player], sample_count);
+            let (upper_variance, upper_standard_error) =
+                scalar_variance_and_error(upper_m2[player], sample_count);
+            players.push(MultiwayBatchExploitabilityPlayerEstimate {
+                player,
+                samples: sample_count as u64,
+                improvement: improvement_mean[player],
+                improvement_variance,
+                improvement_standard_error,
+                upper_bound: upper_mean[player],
+                upper_bound_variance: upper_variance,
+                upper_bound_standard_error: upper_standard_error,
+            });
+        }
+        Ok(MultiwayBatchExploitabilityReport {
+            player_count: self.player_count,
+            players,
+        })
+    }
+
     pub fn strategy_report(
         &self,
         utility_samples: usize,
@@ -2273,6 +2435,224 @@ fn evaluate_public_best_response(
     Ok(value)
 }
 
+/// Pass 1 (T4.2/D-021): омнисциентная рекурсия с накоплением значений
+/// действий целевого игрока в V-таблицу. Возвращает omniscient-значение;
+/// накопления кормят argmax-политику pass 2.
+fn accumulate_public_best_response(
+    tree: &GameTree,
+    profile: &MultiwayHoldemPublicProfile,
+    infosets: &HashMap<BatchInfoSetKey, BatchInfoSetData>,
+    target_player: PlayerId,
+    node_id: TreeNodeId,
+    action_values: &mut HashMap<BatchInfoSetKey, Vec<f64>>,
+) -> Result<f64, String> {
+    if target_player >= profile.hands().len() {
+        return Err(format!(
+            "best-response target player {target_player} is outside private profile"
+        ));
+    }
+    let node = tree
+        .node(node_id)
+        .ok_or_else(|| format!("unknown public node {node_id}"))?;
+    if let Some(terminal) = &node.leaf {
+        if matches!(terminal, LeafKind::RoundComplete) {
+            return Err(format!(
+                "round-complete public node {node_id} has no payoff"
+            ));
+        }
+        return Ok(profile.terminal_utility(node)?[target_player]);
+    }
+    if node.chance.is_some() {
+        let outcomes = profile.chance_outcomes(tree, node_id)?;
+        let mut value = 0.0;
+        for (probability, child) in outcomes {
+            value += probability
+                * accumulate_public_best_response(
+                    tree,
+                    profile,
+                    infosets,
+                    target_player,
+                    child,
+                    action_values,
+                )?;
+        }
+        return Ok(value);
+    }
+
+    let player = node
+        .state
+        .actor
+        .ok_or_else(|| format!("public decision node {node_id} has no actor"))?;
+    if node.children.is_empty() {
+        return Err(format!("public decision node {node_id} has no actions"));
+    }
+    if player == target_player {
+        let key = BatchInfoSetKey {
+            player,
+            public_node: node_id,
+            private_hand: profile.hands()[player],
+        };
+        let mut best = f64::NEG_INFINITY;
+        let mut values = Vec::with_capacity(node.children.len());
+        for &child in &node.children {
+            let child_value = accumulate_public_best_response(
+                tree,
+                profile,
+                infosets,
+                target_player,
+                child,
+                action_values,
+            )?;
+            values.push(child_value);
+            best = best.max(child_value);
+        }
+        let entry = action_values.entry(key).or_default();
+        if entry.len() < values.len() {
+            entry.resize(values.len(), 0.0);
+        }
+        for (slot, value) in entry.iter_mut().zip(values) {
+            *slot += value;
+        }
+        return Ok(best);
+    }
+
+    if player >= profile.hands().len() {
+        return Err(format!(
+            "public decision player {player} is outside private profile"
+        ));
+    }
+    let key = BatchInfoSetKey {
+        player,
+        public_node: node_id,
+        private_hand: profile.hands()[player],
+    };
+    let strategy = infosets
+        .get(&key)
+        .map(|entry| entry.data.average_strategy())
+        .unwrap_or_else(|| vec![1.0 / node.children.len() as f64; node.children.len()]);
+    if strategy.len() != node.children.len() {
+        return Err(format!(
+            "best-response opponent strategy action count mismatch at node {node_id}"
+        ));
+    }
+    let mut value = 0.0;
+    for (&probability, &child) in strategy.iter().zip(&node.children) {
+        value += probability
+            * accumulate_public_best_response(
+                tree,
+                profile,
+                infosets,
+                target_player,
+                child,
+                action_values,
+            )?;
+    }
+    Ok(value)
+}
+
+/// Pass 2 (T4.2/D-021): значение фиксированной argmax-политики целевого
+/// игрока. Непосещённые в pass 1 инфосеты — консервативный fallback на
+/// среднюю стратегию.
+fn evaluate_public_fixed_policy(
+    tree: &GameTree,
+    profile: &MultiwayHoldemPublicProfile,
+    infosets: &HashMap<BatchInfoSetKey, BatchInfoSetData>,
+    policy: &HashMap<BatchInfoSetKey, usize>,
+    target_player: PlayerId,
+    node_id: TreeNodeId,
+) -> Result<f64, String> {
+    if target_player >= profile.hands().len() {
+        return Err(format!(
+            "fixed-policy target player {target_player} is outside private profile"
+        ));
+    }
+    let node = tree
+        .node(node_id)
+        .ok_or_else(|| format!("unknown public node {node_id}"))?;
+    if let Some(terminal) = &node.leaf {
+        if matches!(terminal, LeafKind::RoundComplete) {
+            return Err(format!(
+                "round-complete public node {node_id} has no payoff"
+            ));
+        }
+        return Ok(profile.terminal_utility(node)?[target_player]);
+    }
+    if node.chance.is_some() {
+        let outcomes = profile.chance_outcomes(tree, node_id)?;
+        let mut value = 0.0;
+        for (probability, child) in outcomes {
+            value += probability
+                * evaluate_public_fixed_policy(
+                    tree,
+                    profile,
+                    infosets,
+                    policy,
+                    target_player,
+                    child,
+                )?;
+        }
+        return Ok(value);
+    }
+
+    let player = node
+        .state
+        .actor
+        .ok_or_else(|| format!("public decision node {node_id} has no actor"))?;
+    if node.children.is_empty() {
+        return Err(format!("public decision node {node_id} has no actions"));
+    }
+    if player == target_player {
+        let key = BatchInfoSetKey {
+            player,
+            public_node: node_id,
+            private_hand: profile.hands()[player],
+        };
+        if let Some(&action_index) = policy.get(&key) {
+            if action_index >= node.children.len() {
+                return Err(format!(
+                    "fixed-policy action index {action_index} out of range at node {node_id}"
+                ));
+            }
+            let child = node.children[action_index];
+            return evaluate_public_fixed_policy(
+                tree,
+                profile,
+                infosets,
+                policy,
+                target_player,
+                child,
+            );
+        }
+        // Непосещённый инфосет: консервативный fallback — средняя.
+    }
+
+    if player >= profile.hands().len() {
+        return Err(format!(
+            "public decision player {player} is outside private profile"
+        ));
+    }
+    let key = BatchInfoSetKey {
+        player,
+        public_node: node_id,
+        private_hand: profile.hands()[player],
+    };
+    let strategy = infosets
+        .get(&key)
+        .map(|entry| entry.data.average_strategy())
+        .unwrap_or_else(|| vec![1.0 / node.children.len() as f64; node.children.len()]);
+    if strategy.len() != node.children.len() {
+        return Err(format!(
+            "fixed-policy strategy action count mismatch at node {node_id}"
+        ));
+    }
+    let mut value = 0.0;
+    for (&probability, &child) in strategy.iter().zip(&node.children) {
+        value += probability
+            * evaluate_public_fixed_policy(tree, profile, infosets, policy, target_player, child)?;
+    }
+    Ok(value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2697,6 +3077,16 @@ mod tests {
             estimate.best_response_value + 1e-9 >= estimate.strategy_value
                 && estimate.improvement_standard_error.is_finite()
         }));
+        let exploitability = solver.exploitability_probe(4, 100).unwrap();
+        assert_eq!(exploitability.players.len(), 3);
+        assert!(exploitability.players.iter().all(|estimate| {
+            estimate.upper_bound + 1e-9 >= estimate.improvement
+                && estimate.samples == 4
+                && estimate.improvement_standard_error.is_finite()
+                && estimate.upper_bound_standard_error.is_finite()
+        }));
+        let exploitability_repeat = solver.exploitability_probe(4, 100).unwrap();
+        assert_eq!(exploitability, exploitability_repeat);
         let report = solver.strategy_report(2, 100).unwrap();
         assert_eq!(report.player_count, 3);
         assert_eq!(report.utility_estimate.samples, 2);

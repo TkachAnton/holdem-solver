@@ -66,6 +66,9 @@ pub struct MultiwayHoldemSpotConfig {
     /// Число сэмплов дилов для MC-оценки блокировки представителей
     /// (D-019); 0 — оценку не считать (результат без блока blocking).
     pub blocking_samples: usize,
+    /// Сэмплы BR-замера эксплуатируемости (T4.2, D-021); 0 — замер не
+    /// считать (результат без блока exploitability).
+    pub exploitability_samples: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -94,6 +97,41 @@ pub struct MultiwayHoldemSpotHeroReport {
 /// older result.
 pub const MULTIWAY_HOLDEM_SPOT_RESULT_SCHEMA_VERSION: u32 = 2;
 
+/// T4.2/D-021: замер эксплуатируемости спота с нормировкой слоя spot:
+/// фишки из batch-отчёта переводятся в bb (÷ big_blind) и % банка корня
+/// спота (÷ pot × 100). Headline — max по игрокам paired improvement;
+/// SE — консервативный max по игрокам.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MultiwayHoldemSpotExploitability {
+    pub samples: u64,
+    pub big_blind: holdem_domain::Chips,
+    pub pot: holdem_domain::Chips,
+    pub improvement_chips: f64,
+    pub improvement_bb: f64,
+    pub improvement_pot_percent: f64,
+    pub improvement_standard_error: f64,
+    pub upper_bound_chips: f64,
+    pub upper_bound_bb: f64,
+    pub upper_bound_pot_percent: f64,
+    pub upper_bound_standard_error: f64,
+    pub players: Vec<MultiwayHoldemSpotExploitabilityPlayer>,
+}
+
+/// Per-player замер (T4.2/D-021): paired improvement фиксированной
+/// argmax-политики против средней и парная верхняя граница.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MultiwayHoldemSpotExploitabilityPlayer {
+    pub player: PlayerId,
+    pub improvement_chips: f64,
+    pub improvement_bb: f64,
+    pub improvement_pot_percent: f64,
+    pub improvement_standard_error: f64,
+    pub upper_bound_chips: f64,
+    pub upper_bound_bb: f64,
+    pub upper_bound_pot_percent: f64,
+    pub upper_bound_standard_error: f64,
+}
+
 #[derive(Debug, Clone)]
 pub struct MultiwayHoldemSpotResult {
     pub tree_fingerprint: u64,
@@ -109,6 +147,8 @@ pub struct MultiwayHoldemSpotResult {
     pub card_abstraction: Option<crate::card_abstraction::CardAbstractionReport>,
     /// MC-оценка блокировки представителей (D-019): None — не считалась.
     pub blocking_estimate: Option<crate::card_abstraction::BlockingEstimate>,
+    /// Замер эксплуатируемости (T4.2, D-021): None — не считался.
+    pub exploitability: Option<MultiwayHoldemSpotExploitability>,
 }
 
 #[derive(Debug, Serialize)]
@@ -123,6 +163,8 @@ struct JsonMultiwayHoldemSpotResult {
     card_abstraction: Option<JsonCardAbstractionOutcome>,
     #[serde(skip_serializing_if = "Option::is_none")]
     blocking: Option<JsonBlockingEstimate>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    exploitability: Option<JsonExploitability>,
 }
 
 #[derive(Debug, Serialize)]
@@ -171,6 +213,35 @@ struct JsonMultiwayHoldemSpotActionReport {
     action: ActionExport,
     frequency: f64,
     positive_regret: f64,
+}
+
+#[derive(Debug, Serialize)]
+struct JsonExploitability {
+    samples: u64,
+    big_blind: holdem_domain::Chips,
+    pot: holdem_domain::Chips,
+    improvement_chips: f64,
+    improvement_bb: f64,
+    improvement_pot_percent: f64,
+    improvement_standard_error: f64,
+    upper_bound_chips: f64,
+    upper_bound_bb: f64,
+    upper_bound_pot_percent: f64,
+    upper_bound_standard_error: f64,
+    players: Vec<JsonExploitabilityPlayer>,
+}
+
+#[derive(Debug, Serialize)]
+struct JsonExploitabilityPlayer {
+    player: PlayerId,
+    improvement_chips: f64,
+    improvement_bb: f64,
+    improvement_pot_percent: f64,
+    improvement_standard_error: f64,
+    upper_bound_chips: f64,
+    upper_bound_bb: f64,
+    upper_bound_pot_percent: f64,
+    upper_bound_standard_error: f64,
 }
 
 impl MultiwayHoldemSpotResult {
@@ -243,6 +314,37 @@ impl MultiwayHoldemSpotResult {
                     deals: estimate.deals,
                     lost_mass: estimate.lost_mass,
                     lost_fraction: estimate.lost_fraction,
+                }),
+            exploitability: self
+                .exploitability
+                .as_ref()
+                .map(|report| JsonExploitability {
+                    samples: report.samples,
+                    big_blind: report.big_blind,
+                    pot: report.pot,
+                    improvement_chips: report.improvement_chips,
+                    improvement_bb: report.improvement_bb,
+                    improvement_pot_percent: report.improvement_pot_percent,
+                    improvement_standard_error: report.improvement_standard_error,
+                    upper_bound_chips: report.upper_bound_chips,
+                    upper_bound_bb: report.upper_bound_bb,
+                    upper_bound_pot_percent: report.upper_bound_pot_percent,
+                    upper_bound_standard_error: report.upper_bound_standard_error,
+                    players: report
+                        .players
+                        .iter()
+                        .map(|player| JsonExploitabilityPlayer {
+                            player: player.player,
+                            improvement_chips: player.improvement_chips,
+                            improvement_bb: player.improvement_bb,
+                            improvement_pot_percent: player.improvement_pot_percent,
+                            improvement_standard_error: player.improvement_standard_error,
+                            upper_bound_chips: player.upper_bound_chips,
+                            upper_bound_bb: player.upper_bound_bb,
+                            upper_bound_pot_percent: player.upper_bound_pot_percent,
+                            upper_bound_standard_error: player.upper_bound_standard_error,
+                        })
+                        .collect(),
                 }),
         })
         .map_err(|error| error.to_string())
@@ -538,6 +640,74 @@ impl MultiwayHoldemSpotConfig {
         )
     }
 
+    /// T4.2/D-021: замер эксплуатируемости с нормировкой слоя spot:
+    /// фишки -> bb (÷ big_blind) и % банка корня спота (÷ pot × 100).
+    /// Headline = max по игрокам paired improvement (прецедент pushfold);
+    /// SE — консервативный max по игрокам.
+    fn spot_exploitability(
+        &self,
+        solver: &MultiwayHoldemBatchSolver,
+    ) -> Result<MultiwayHoldemSpotExploitability, String> {
+        let report =
+            solver.exploitability_probe(self.exploitability_samples, self.max_private_attempts)?;
+        let state = self.state_after_history()?;
+        let big_blind = self.table.big_blind.max(1) as f64;
+        let pot_chips = state.pot;
+        let pot = pot_chips.max(1) as f64;
+        let players = report
+            .players
+            .iter()
+            .map(|estimate| MultiwayHoldemSpotExploitabilityPlayer {
+                player: estimate.player,
+                improvement_chips: estimate.improvement,
+                improvement_bb: estimate.improvement / big_blind,
+                improvement_pot_percent: estimate.improvement / pot * 100.0,
+                improvement_standard_error: estimate.improvement_standard_error,
+                upper_bound_chips: estimate.upper_bound,
+                upper_bound_bb: estimate.upper_bound / big_blind,
+                upper_bound_pot_percent: estimate.upper_bound / pot * 100.0,
+                upper_bound_standard_error: estimate.upper_bound_standard_error,
+            })
+            .collect::<Vec<_>>();
+        if players.is_empty() {
+            return Err("exploitability report has no players".to_string());
+        }
+        let improvement_chips = players
+            .iter()
+            .map(|player| player.improvement_chips)
+            .fold(f64::NEG_INFINITY, f64::max);
+        let upper_chips = players
+            .iter()
+            .map(|player| player.upper_bound_chips)
+            .fold(f64::NEG_INFINITY, f64::max);
+        let improvement_se = players
+            .iter()
+            .map(|player| player.improvement_standard_error)
+            .fold(f64::NAN, f64::max);
+        let upper_se = players
+            .iter()
+            .map(|player| player.upper_bound_standard_error)
+            .fold(f64::NAN, f64::max);
+        Ok(MultiwayHoldemSpotExploitability {
+            samples: report
+                .players
+                .first()
+                .map(|player| player.samples)
+                .unwrap_or(0),
+            big_blind: self.table.big_blind,
+            pot: pot_chips,
+            improvement_chips,
+            improvement_bb: improvement_chips / big_blind,
+            improvement_pot_percent: improvement_chips / pot * 100.0,
+            improvement_standard_error: improvement_se,
+            upper_bound_chips: upper_chips,
+            upper_bound_bb: upper_chips / big_blind,
+            upper_bound_pot_percent: upper_chips / pot * 100.0,
+            upper_bound_standard_error: upper_se,
+            players,
+        })
+    }
+
     /// Собирает результат с отчётом применённой абстракции карт (D-019):
     /// None — точный режим, отчёта нет.
     pub fn result_from_solver_with_abstraction(
@@ -551,6 +721,13 @@ impl MultiwayHoldemSpotConfig {
         let mut result = self.result_from_solver(tree, solver, utility_samples)?;
         result.card_abstraction = abstraction_report;
         result.blocking_estimate = blocking_estimate;
+        // T4.2/D-021: единая точка для solve() и CLI/job-store.
+        let exploitability = if self.exploitability_samples > 0 {
+            Some(self.spot_exploitability(solver)?)
+        } else {
+            None
+        };
+        result.exploitability = exploitability;
         Ok(result)
     }
     pub fn result_from_solver(
@@ -573,6 +750,7 @@ impl MultiwayHoldemSpotConfig {
             tree_index: tree_index_json(tree),
             card_abstraction: None,
             blocking_estimate: None,
+            exploitability: None,
         })
     }
 
@@ -837,6 +1015,7 @@ mod tests {
         });
         MultiwayHoldemSpotConfig {
             board_cards: Vec::new(),
+            exploitability_samples: 0,
             table,
             action_history: Vec::new(),
             ranges: vec![hero_range, range(&["Kc Kd"]), range(&["Qs Qh"])],
@@ -989,6 +1168,7 @@ mod tests {
             .collect();
         let mut config = MultiwayHoldemSpotConfig {
             board_cards: Vec::new(),
+            exploitability_samples: 0,
             table,
             action_history: vec![],
             ranges,
@@ -1269,5 +1449,45 @@ mod tests {
         let result = config.solve(8, 1).unwrap();
         assert_ne!(result.tree_fingerprint, 0);
         assert!(!result.hero.observed_hands.is_empty());
+    }
+
+    #[test]
+    fn exploitability_report_present_with_samples() {
+        let mut config = config();
+        config.exploitability_samples = 4;
+        let result = config.solve(8, 1).unwrap();
+        let report = result.exploitability.as_ref().unwrap();
+        assert_eq!(report.samples, 4);
+        assert_eq!(report.players.len(), 3);
+        assert!(report.players.iter().all(|player| {
+            player.upper_bound_chips + 1e-9 >= player.improvement_chips
+                && player.improvement_bb.is_finite()
+                && player.improvement_pot_percent.is_finite()
+                && player.improvement_standard_error.is_finite()
+        }));
+        let max_improvement = report
+            .players
+            .iter()
+            .map(|player| player.improvement_chips)
+            .fold(f64::NEG_INFINITY, f64::max);
+        assert!((report.improvement_chips - max_improvement).abs() < 1e-9);
+        let json = result.to_json().unwrap();
+        assert!(json.contains("\"exploitability\""));
+        assert!(json.contains("\"improvement_pot_percent\""));
+        // Детерминизм: тот же конфиг — тот же замер.
+        let repeat = config.solve(8, 1).unwrap();
+        assert_eq!(result.exploitability, repeat.exploitability);
+    }
+
+    #[test]
+    fn exploitability_absent_without_samples() {
+        let mut config = config();
+        config.exploitability_samples = 0;
+        let result = config.solve(4, 1).unwrap();
+        assert!(result.exploitability.is_none());
+        // Жёсткий гейт байт-идентичности (D-021, требование ревью):
+        // без сэмплов в JSON нет ни блока, ни ключа.
+        let json = result.to_json().unwrap();
+        assert!(!json.contains("\"exploitability\""));
     }
 }

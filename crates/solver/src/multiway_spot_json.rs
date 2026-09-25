@@ -231,6 +231,10 @@ pub struct CardAbstractionJson {
     pub blocking_samples: usize,
 }
 
+fn default_exploitability_samples() -> usize {
+    128
+}
+
 fn default_blocking_samples() -> usize {
     128
 }
@@ -258,6 +262,9 @@ pub struct MultiwayHoldemSpotExecutionJson {
     pub worker_count: usize,
     #[serde(default = "default_reduction_batch_size")]
     pub reduction_batch_size: usize,
+    /// Сэмплы BR-замера эксплуатируемости (T4.2, D-021); 0 — выкл.
+    #[serde(default = "default_exploitability_samples")]
+    pub exploitability_samples: usize,
     #[serde(default)]
     pub config_fingerprint: u64,
 }
@@ -272,6 +279,7 @@ impl Default for MultiwayHoldemSpotExecutionJson {
             max_private_attempts: default_max_private_attempts(),
             worker_count: default_worker_count(),
             reduction_batch_size: default_reduction_batch_size(),
+            exploitability_samples: default_exploitability_samples(),
             config_fingerprint: 0,
         }
     }
@@ -376,6 +384,7 @@ impl MultiwayHoldemSpotJob {
             reduction_batch_size: execution.reduction_batch_size,
             card_abstraction: card_abstraction_spec,
             blocking_samples,
+            exploitability_samples: execution.exploitability_samples,
         };
         // T4.1/D-020: карты, гарантированно выходящие на борд (стартовый
         // борд плюс карты всех явных исходов улицы — фиксированные
@@ -823,5 +832,27 @@ mod tests {
         }];
         job.hero.hand = "Ah 5h".to_string();
         assert!(job.into_config().is_err());
+    }
+
+    #[test]
+    fn json_execution_exploitability_samples_default_and_override() {
+        // Дефолт — 128 сэмплов (замер T4.2-3: ~0.08 c/сэмпл верхней
+        // границы; two-pass ~1.5-2x — секунды поверх солва).
+        let job = sample_job();
+        let config = job.into_config().unwrap();
+        assert_eq!(config.exploitability_samples, 128);
+
+        // Явный 0 — замер выключен (результат без блока exploitability).
+        let mut job = sample_job();
+        job.execution.exploitability_samples = 0;
+        let config = job.into_config().unwrap();
+        assert_eq!(config.exploitability_samples, 0);
+
+        // JSON round-trip сохраняет значение.
+        let mut job = sample_job();
+        job.execution.exploitability_samples = 7;
+        let json = job.to_json().unwrap();
+        let decoded = MultiwayHoldemSpotJob::from_json(&json).unwrap();
+        assert_eq!(decoded.execution.exploitability_samples, 7);
     }
 }

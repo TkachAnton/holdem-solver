@@ -23,6 +23,7 @@ struct CliOptions {
     output_path: Option<PathBuf>,
     job_directory: Option<PathBuf>,
     iterations: Option<u64>,
+    br_samples: Option<usize>,
     utility_samples: usize,
     job_id: Option<String>,
     stack_bb: Option<f64>,
@@ -43,7 +44,7 @@ struct CommandResult {
 }
 
 fn usage() -> &'static str {
-    "Usage:\n  holdem-solver validate --job JOB.json [--json]\n  holdem-solver solve --job JOB.json --output RESULT.json [--job-dir DIR] [--iterations N] [--utility-samples N] [--job-id ID] [--json]\n  holdem-solver icm --stacks S1,S2,... --payouts P1,P2,... [--hero INDEX] [--villain INDEX] [--delta N] [--json]\n  holdem-solver pushfold [--stack N] [--matrix-boards N] [--output RESULT.json] [--json]\n\nCommands:\n  validate  Parse the JSON job, validate history, and build the configured tree.\n  solve     Run or resume a persistent arena job and write a JSON spot result.\n  icm       Compute exact ICM equity and bubble factors for stacks and payouts.\n  pushfold  Solve heads-up push/fold for a given effective stack.\n  flop-clusters  Deterministic flop clustering report (1755 classes); --equity adds exact equity refinement (full pass, minutes).\n  turn-clusters  Deterministic turn clustering report; --equity adds exact equity refinement (~1 min release).\n  river-clusters  Deterministic river clustering report; --equity adds exact equity refinement (~15 s release).\n\nOutput:\n  --json    Emit one machine-readable JSON success or error envelope."
+    "Usage:\n  holdem-solver validate --job JOB.json [--json]\n  holdem-solver solve --job JOB.json --output RESULT.json [--job-dir DIR] [--iterations N] [--utility-samples N] [--br-samples N] [--job-id ID] [--json]\n  holdem-solver icm --stacks S1,S2,... --payouts P1,P2,... [--hero INDEX] [--villain INDEX] [--delta N] [--json]\n  holdem-solver pushfold [--stack N] [--matrix-boards N] [--output RESULT.json] [--json]\n\nCommands:\n  validate  Parse the JSON job, validate history, and build the configured tree.\n  solve     Run or resume a persistent arena job and write a JSON spot result.\n  icm       Compute exact ICM equity and bubble factors for stacks and payouts.\n  pushfold  Solve heads-up push/fold for a given effective stack.\n  flop-clusters  Deterministic flop clustering report (1755 classes); --equity adds exact equity refinement (full pass, minutes).\n  turn-clusters  Deterministic turn clustering report; --equity adds exact equity refinement (~1 min release).\n  river-clusters  Deterministic river clustering report; --equity adds exact equity refinement (~15 s release).\n\nOutput:\n  --json    Emit one machine-readable JSON success or error envelope."
 }
 
 fn main() {
@@ -189,6 +190,12 @@ fn solve_command(options: CliOptions) -> Result<CommandResult, String> {
         (Some((_, estimate)), true) => estimate.clone(),
         _ => None,
     };
+    // T4.2/D-021: override числа сэмплов BR поверх execution.
+    let br_samples = options
+        .br_samples
+        .unwrap_or(execution.exploitability_samples);
+    let mut config = config;
+    config.exploitability_samples = br_samples;
     let result = config.result_from_solver_with_abstraction(
         &tree,
         &solver,
@@ -198,6 +205,16 @@ fn solve_command(options: CliOptions) -> Result<CommandResult, String> {
     )?;
     write_text_atomically(&output_path, &result.to_json()?)?;
     let status = format!("{:?}", manifest.status);
+    let exploitability_line = match &result.exploitability {
+        Some(report) => format!(
+            "exploitability={:.3}% pot (SE {:.3}; upper {:.3}% pot; {} samples)",
+            report.improvement_pot_percent,
+            report.improvement_standard_error,
+            report.upper_bound_pot_percent,
+            report.samples
+        ),
+        None => "exploitability=not measured".to_string(),
+    };
     Ok(CommandResult {
         human_lines: vec![
             format!("job_id={}", manifest.job_id),
@@ -205,6 +222,7 @@ fn solve_command(options: CliOptions) -> Result<CommandResult, String> {
             format!("completed_iterations={}", manifest.completed_iterations),
             format!("result={}", output_path.display()),
             format!("job_directory={}", job_directory.display()),
+            exploitability_line,
         ],
         json: json!({
             "ok": true,
@@ -512,6 +530,7 @@ fn parse_job_args(arguments: &[String], command: &str) -> Result<CliOptions, Str
     let mut job_directory = None;
     let mut iterations = None;
     let mut utility_samples = 256usize;
+    let mut br_samples: Option<usize> = None;
     let mut job_id = None;
     let mut index = 1;
     while index < arguments.len() {
@@ -534,6 +553,15 @@ fn parse_job_args(arguments: &[String], command: &str) -> Result<CliOptions, Str
                         .parse::<u64>()
                         .map_err(|error| format!("invalid --iterations: {error}"))?,
                 )
+            }
+            "--br-samples" => {
+                let parsed = value(&mut index)?
+                    .parse::<usize>()
+                    .map_err(|error| format!("invalid --br-samples: {error}"))?;
+                if parsed == 0 {
+                    return Err("--br-samples must be positive".to_string());
+                }
+                br_samples = Some(parsed);
             }
             "--utility-samples" => {
                 utility_samples = value(&mut index)?
@@ -565,6 +593,7 @@ fn parse_job_args(arguments: &[String], command: &str) -> Result<CliOptions, Str
         job_directory,
         iterations,
         utility_samples,
+        br_samples,
         job_id,
         stack_bb: None,
         matrix_boards: None,
@@ -649,6 +678,7 @@ fn parse_icm_args(arguments: &[String]) -> Result<CliOptions, String> {
         job_directory: None,
         iterations: None,
         utility_samples: 0,
+        br_samples: None,
         job_id: None,
         granularity: None,
         stack_bb: None,
@@ -716,6 +746,7 @@ fn parse_pushfold_args(arguments: &[String]) -> Result<CliOptions, String> {
         job_directory: None,
         iterations: None,
         utility_samples: 0,
+        br_samples: None,
         job_id: None,
         stack_bb: Some(stack_bb),
         matrix_boards: Some(matrix_boards),
@@ -891,6 +922,7 @@ fn parse_flop_clusters_args(arguments: &[String]) -> Result<CliOptions, String> 
         job_directory: None,
         iterations: None,
         utility_samples: 0,
+        br_samples: None,
         job_id: None,
         stack_bb: None,
         matrix_boards: None,
@@ -1089,6 +1121,7 @@ fn parse_street_clusters_args(arguments: &[String], command: &str) -> Result<Cli
         job_directory: None,
         iterations: None,
         utility_samples: 0,
+        br_samples: None,
         job_id: None,
         stack_bb: None,
         matrix_boards: None,
