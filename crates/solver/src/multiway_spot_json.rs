@@ -4,7 +4,7 @@
 //! enums: actions, ante modes, ranges, cards and tree abstraction are parsed
 //! explicitly and validated before a `MultiwayHoldemSpotConfig` is built.
 
-use holdem_cards::{cards_from_str, mask_from_cards, DeckMask};
+use holdem_cards::{cards_from_str, mask_from_cards, Card, DeckMask};
 use holdem_domain::table::{AnteMode, TableConfig};
 use holdem_domain::{Action, ActionSizes, Chips, PlayerId};
 use holdem_ranges::{combos_for_hand, parse_range, Combo, WeightedCombo, WeightedRange};
@@ -56,6 +56,11 @@ pub struct MultiwayHoldemSpotJob {
     pub dead_cards: String,
     #[serde(default)]
     pub history: Vec<MultiwayHoldemSpotActionJson>,
+    /// Публичный борд стартующего спота (T4.1, D-020): отсутствует/пусто —
+    /// префлоп-старт (прежнее поведение), 3/4/5 карт — старт на
+    /// флопе/тёрне/ривере.
+    #[serde(default)]
+    pub board: String,
     /// One continuation range per table seat. These ranges are interpreted at
     /// the state after `history`; the parser does not infer action-conditioned
     /// range narrowing from the action sequence.
@@ -307,6 +312,12 @@ impl MultiwayHoldemSpotJob {
         };
         table.validate()?;
         let dead_cards = parse_cards_mask(&self.dead_cards)?;
+        // T4.1/D-020: борд стартующего спота; пустая строка — префлоп-старт.
+        let board_cards = parse_board_cards(&self.board)?;
+        let board_mask = mask_from_cards(&board_cards).map_err(|error| error.to_string())?;
+        if dead_cards & board_mask != 0 {
+            return Err("spot board cards conflict with dead cards".to_string());
+        }
         let history = self
             .history
             .into_iter()
@@ -321,6 +332,14 @@ impl MultiwayHoldemSpotJob {
             .map(MultiwayHoldemSpotRangeJson::into_range)
             .collect::<Result<Vec<_>, _>>()?;
         let hero_hands = parse_hero_hands(&self.hero.hand)?;
+        for hand in &hero_hands {
+            if hand.mask() & board_mask != 0 {
+                return Err(format!(
+                    "spot hero hand {:?} conflicts with the board",
+                    hand.cards
+                ));
+            }
+        }
         let card_abstraction_spec = self
             .tree
             .chance
@@ -334,13 +353,18 @@ impl MultiwayHoldemSpotJob {
             .as_ref()
             .map(|spec| spec.blocking_samples)
             .unwrap_or(0);
+        let preflop_sizing = self.tree.preflop.clone().into_sizing();
         let tree = self.tree.into_tree_config()?;
+        validate_postflop_start(&tree, &preflop_sizing, &board_cards)?;
         let execution = self.execution;
-        let config = MultiwayHoldemSpotConfig {
+        let mut config = MultiwayHoldemSpotConfig {
             table,
             action_history: history,
             ranges,
+            // Маска борда вливается в dead_cards: сэмплер дилов, пэйофф и
+            // блокеры D-019 работают с постфлоп-стартом без правок.
             dead_cards,
+            board_cards,
             tree,
             hero_player: self.hero.player,
             hero_hands,
@@ -353,9 +377,74 @@ impl MultiwayHoldemSpotJob {
             card_abstraction: card_abstraction_spec,
             blocking_samples,
         };
+        // T4.1/D-020: карты, гарантированно выходящие на борд (стартовый
+        // борд плюс карты всех явных исходов улицы — фиксированные
+        // ранауты), не могут лежать в приватных руках: маска вливается в
+        // dead_cards — сэмплер не генерирует невозможные дилы; конфликт
+        // hero-руки с fixed-картами ловит validate (hero vs dead_cards).
+        let certain = config.certain_public_mask()?;
+        if config.dead_cards & certain != 0 {
+            return Err("spot dead cards conflict with fixed public cards".to_string());
+        }
+        config.dead_cards |= certain;
         config.validate()?;
         Ok(config)
     }
+}
+
+/// T4.1/D-020: парсинг борда стартующего спота. 3/4/5 карт — флоп/тёрн/
+/// ривер-старт; пустая строка — префлоп-старт (прежнее поведение).
+fn parse_board_cards(text: &str) -> Result<Vec<Card>, String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Ok(Vec::new());
+    }
+    let cards = cards_from_str(trimmed).map_err(|error| error.to_string())?;
+    match cards.len() {
+        3 | 4 | 5 => Ok(cards),
+        other => Err(format!("spot board must hold 3, 4 or 5 cards, got {other}")),
+    }
+}
+
+/// T4.1/D-020: строгая валидация постфлоп-старта — конфигурации улиц,
+/// уже пройденных стартовым бордом, обязаны быть пустыми: мёртвый конфиг
+/// ловится на парсинге, а не молча игнорируется.
+fn validate_postflop_start(
+    tree: &MultiwayHoldemSpotTreeConfig,
+    preflop: &StreetSizing,
+    board_cards: &[Card],
+) -> Result<(), String> {
+    if board_cards.is_empty() {
+        return Ok(());
+    }
+    let start_name = match board_cards.len() {
+        3 => "the flop",
+        4 => "the turn",
+        _ => "the river",
+    };
+    if *preflop != StreetSizing::default() {
+        return Err(format!(
+            "preflop sizing is unreachable when the spot starts on {start_name}"
+        ));
+    }
+    if let MultiwayHoldemSpotTreeConfig::Full(config) = tree {
+        if config.chance.flop.is_some() {
+            return Err(format!(
+                "explicit flop outcomes are unreachable when the spot starts on {start_name}"
+            ));
+        }
+        if board_cards.len() >= 4 && config.chance.turn.is_some() {
+            return Err(format!(
+                "explicit turn outcomes are unreachable when the spot starts on {start_name}"
+            ));
+        }
+        if board_cards.len() >= 5 && config.chance.river.is_some() {
+            return Err(format!(
+                "explicit river outcomes are unreachable when the spot starts on {start_name}"
+            ));
+        }
+    }
+    Ok(())
 }
 
 use holdem_solver_abstraction::Granularity;
@@ -528,6 +617,7 @@ mod tests {
                 dead_money: 0,
             },
             dead_cards: String::new(),
+            board: String::new(),
             history: Vec::new(),
             ranges: vec![
                 MultiwayHoldemSpotRangeJson {
@@ -605,5 +695,133 @@ mod tests {
         let config = job.into_config().unwrap();
         assert_eq!(config.hero_hands.len(), 1);
         assert_eq!(config.ranges[0].combos[0].weight, 0.25);
+    }
+
+    fn history_action(json: &str) -> MultiwayHoldemSpotActionJson {
+        serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn json_board_field_round_trips() {
+        let mut job = sample_job();
+        job.board = "2s 3d 4c".to_string();
+        let json = job.to_json().unwrap();
+        let decoded = MultiwayHoldemSpotJob::from_json(&json).unwrap();
+        assert_eq!(decoded.board, "2s 3d 4c");
+    }
+
+    #[test]
+    fn json_board_flop_start_replays_to_hero_decision() {
+        use holdem_domain::Street;
+        let mut job = sample_job();
+        job.history = vec![
+            history_action(r#"{"player":0,"kind":"raise","to":5}"#),
+            history_action(r#"{"player":1,"kind":"fold"}"#),
+            history_action(r#"{"player":2,"kind":"call"}"#),
+        ];
+        job.board = "2s 3d 4c".to_string();
+        job.hero.player = 2;
+        job.hero.hand = "QQ".to_string();
+        job.ranges[2].range = "QQ".to_string();
+        let config = job.into_config().unwrap();
+        assert_eq!(config.board_cards, cards_from_str("2s 3d 4c").unwrap());
+        assert_eq!(
+            config.dead_cards,
+            mask_from_cards(&cards_from_str("2s 3d 4c").unwrap()).unwrap()
+        );
+        let state = config.state_after_history().unwrap();
+        assert_eq!(state.street, Street::Flop);
+        assert_eq!(state.actor, Some(2));
+        assert_eq!(state.board.len(), 3);
+        assert_eq!(state.current_bet, 0);
+        assert_eq!(state.pot, 11);
+    }
+
+    #[test]
+    fn json_board_rejects_invalid_configurations() {
+        // Длина борда вне {3, 4, 5}.
+        let mut job = sample_job();
+        job.board = "2s 7d".to_string();
+        assert!(job.into_config().is_err());
+
+        // Борд конфликтует с dead_cards.
+        let mut job = sample_job();
+        job.board = "2s 3d 4c".to_string();
+        job.dead_cards = "2s".to_string();
+        assert!(job.into_config().is_err());
+
+        // Префлоп-сайзинг недостижим при постфлоп-старте.
+        let mut job = sample_job();
+        job.board = "2s 3d 4c".to_string();
+        job.tree.preflop.explicit_raise_to = vec![6];
+        assert!(job.into_config().is_err());
+
+        // Явные флоп-исходы недостижимы при флоп-старте (Full-режим).
+        let mut job = sample_job();
+        job.board = "2s 3d 4c".to_string();
+        job.tree.mode = MultiwayHoldemSpotTreeModeJson::Full;
+        job.tree.chance.flop = vec![MultiwayHoldemSpotChanceOutcomeJson {
+            cards: "7d 8h 9s".to_string(),
+            probability: 1.0,
+        }];
+        assert!(job.into_config().is_err());
+
+        // Рука героя конфликтует с бордом.
+        let mut job = sample_job();
+        job.board = "As Ks Qs".to_string();
+        assert!(job.into_config().is_err());
+    }
+
+    #[test]
+    fn json_fixed_runout_cards_join_dead_mask() {
+        let mut job = sample_job();
+        job.board = "2s 3d 4c".to_string();
+        job.tree.mode = MultiwayHoldemSpotTreeModeJson::Full;
+        job.tree.chance.turn = vec![MultiwayHoldemSpotChanceOutcomeJson {
+            cards: "5h".to_string(),
+            probability: 1.0,
+        }];
+        job.tree.chance.river = vec![MultiwayHoldemSpotChanceOutcomeJson {
+            cards: "3h".to_string(),
+            probability: 1.0,
+        }];
+        let config = job.into_config().unwrap();
+        assert_eq!(
+            config.dead_cards,
+            mask_from_cards(&cards_from_str("2s 3d 4c 5h 3h").unwrap()).unwrap()
+        );
+
+        // Карты лишь части исходов не гарантированы: в dead уходит только борд.
+        let mut job = sample_job();
+        job.board = "2s 3d 4c".to_string();
+        job.tree.mode = MultiwayHoldemSpotTreeModeJson::Full;
+        job.tree.chance.turn = vec![
+            MultiwayHoldemSpotChanceOutcomeJson {
+                cards: "5h".to_string(),
+                probability: 0.5,
+            },
+            MultiwayHoldemSpotChanceOutcomeJson {
+                cards: "5c".to_string(),
+                probability: 0.5,
+            },
+        ];
+        let config = job.into_config().unwrap();
+        assert_eq!(
+            config.dead_cards,
+            mask_from_cards(&cards_from_str("2s 3d 4c").unwrap()).unwrap()
+        );
+    }
+
+    #[test]
+    fn json_hero_conflicting_with_fixed_runout_is_rejected() {
+        let mut job = sample_job();
+        job.board = "2s 3d 4c".to_string();
+        job.tree.mode = MultiwayHoldemSpotTreeModeJson::Full;
+        job.tree.chance.turn = vec![MultiwayHoldemSpotChanceOutcomeJson {
+            cards: "5h".to_string(),
+            probability: 1.0,
+        }];
+        job.hero.hand = "Ah 5h".to_string();
+        assert!(job.into_config().is_err());
     }
 }

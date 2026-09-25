@@ -6,7 +6,7 @@
 //! selected starting point. The underlying batch solver still owns exact
 //! blockers, ChipEV settlement, sampling and convergence diagnostics.
 
-use holdem_cards::DeckMask;
+use holdem_cards::{mask_from_cards, Card, DeckMask};
 use holdem_domain::setup::build_preflop_state;
 use holdem_domain::table::TableConfig;
 use holdem_domain::{Action, GameState, PlayerId, PlayerStatus, Street, TerminalState};
@@ -45,6 +45,10 @@ pub struct MultiwayHoldemSpotConfig {
     /// conditioned on the observed history; the adapter does not guess them.
     pub ranges: Vec<WeightedRange>,
     pub dead_cards: DeckMask,
+    /// Публичный борд стартующего спота (T4.1, D-020): пусто — префлоп-старт
+    /// (прежнее поведение); 3/4/5 карт — флоп/тёрн/ривер-старт, карты
+    /// потребляются границами улиц в `state_after_history`.
+    pub board_cards: Vec<Card>,
     pub tree: MultiwayHoldemSpotTreeConfig,
     pub hero_player: PlayerId,
     /// Exact hero combos to aggregate, for example all twelve combos from
@@ -254,6 +258,49 @@ fn json_spot_action(action: &MultiwayBatchActionReport) -> JsonMultiwayHoldemSpo
 }
 
 impl MultiwayHoldemSpotConfig {
+    /// T4.1/D-020: маска карт, гарантированно попадающих на борд спота:
+    /// стартовый борд плюс карты, присутствующие во всех явных исходах
+    /// каждой достижимой улицы (фиксированные ранауты). Улицы, пройденные
+    /// стартовым бордом, недостижимы — их исходы мёртвый конфиг и в маску
+    /// не входят. Такие карты не могут оказаться в приватных руках: маска
+    /// вливается в dead_cards, сэмплер не генерирует невозможные дилы.
+    pub fn certain_public_mask(&self) -> Result<DeckMask, String> {
+        let mut mask = mask_from_cards(&self.board_cards).map_err(|error| error.to_string())?;
+        if let MultiwayHoldemSpotTreeConfig::Full(config) = &self.tree {
+            for (outcomes, min_board_len) in [
+                (&config.chance.flop, 3usize),
+                (&config.chance.turn, 4),
+                (&config.chance.river, 5),
+            ] {
+                // Улица, пройденная стартовым бордом, недостижима: её
+                // явные исходы — мёртвый конфиг (JSON-слой отвергает их
+                // на парсинге); в маску входят только достижимые улицы.
+                if self.board_cards.len() >= min_board_len {
+                    continue;
+                }
+                if let Some(outcomes) = outcomes {
+                    let mut certain_street: Option<DeckMask> = None;
+                    for outcome in outcomes {
+                        let outcome_mask =
+                            mask_from_cards(&outcome.cards).map_err(|error| error.to_string())?;
+                        certain_street = Some(match certain_street {
+                            None => outcome_mask,
+                            Some(previous) => previous & outcome_mask,
+                        });
+                    }
+                    if let Some(street) = certain_street {
+                        if street & mask != 0 {
+                            return Err("chance outcome cards conflict with earlier public cards"
+                                .to_string());
+                        }
+                        mask |= street;
+                    }
+                }
+            }
+        }
+        Ok(mask)
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         if !(3..=8).contains(&self.table.table_size) {
             return Err("multiway spot requires a 3-8 player table".to_string());
@@ -310,9 +357,25 @@ impl MultiwayHoldemSpotConfig {
         combos_for_hand(hand_class)
     }
 
+    /// Порядок постфлоп-действий для реплея границ улиц истории: явный
+    /// порядок из Full-конфига, при его отсутствии — порядок стола; тот же
+    /// выбор делает `build_tree`, чтобы состояние и дерево не расходились.
+    fn effective_postflop_order(&self) -> Vec<PlayerId> {
+        let explicit = match &self.tree {
+            MultiwayHoldemSpotTreeConfig::Full(config) => config.postflop_order.clone(),
+            MultiwayHoldemSpotTreeConfig::Round(_) => Vec::new(),
+        };
+        if explicit.is_empty() {
+            self.table.postflop_order()
+        } else {
+            explicit
+        }
+    }
+
     pub fn state_after_history(&self) -> Result<GameState, String> {
         self.validate()?;
         let mut state = build_preflop_state(&self.table)?;
+        let mut board_index = 0usize;
         for (index, observed) in self.action_history.iter().enumerate() {
             if state.terminal.is_some() {
                 return Err(format!(
@@ -326,12 +389,36 @@ impl MultiwayHoldemSpotConfig {
                 ));
             }
             state.apply_action(observed.action.clone())?;
+            // T4.1/D-020: закрытый раунд при недоигранном борде — граница улицы.
+            if state.terminal.is_none() && state.actor.is_none() {
+                let remaining = self.board_cards.len() - board_index;
+                if remaining == 0 {
+                    return Err(
+                        "spot history ends between betting rounds without an actor".to_string()
+                    );
+                }
+                let needed = state.street.required_new_board_cards();
+                if needed == 0 || remaining < needed {
+                    return Err(format!(
+                        "spot board has {remaining} card(s) left, but street needs {needed}"
+                    ));
+                }
+                let new_cards = &self.board_cards[board_index..board_index + needed];
+                state.advance_to_next_street(new_cards, &self.effective_postflop_order())?;
+                board_index += needed;
+            }
         }
         if state.terminal.is_some() {
             return Err("spot history ends at a terminal state, not a hero decision".to_string());
         }
         if state.actor.is_none() {
             return Err("spot history ends between betting rounds without an actor".to_string());
+        }
+        if board_index < self.board_cards.len() {
+            return Err(format!(
+                "spot board has {} unconsumed card(s) while a decision is pending",
+                self.board_cards.len() - board_index
+            ));
         }
         if state.actor != Some(self.hero_player) {
             return Err(format!(
@@ -375,7 +462,7 @@ impl MultiwayHoldemSpotConfig {
         let solver = MultiwayHoldemBatchSolver::new(
             tree.clone(),
             self.ranges.clone(),
-            self.dead_cards,
+            self.dead_cards | self.certain_public_mask()?,
             self.seed,
             config_fingerprint,
             self.max_private_attempts,
@@ -413,7 +500,7 @@ impl MultiwayHoldemSpotConfig {
                         &tree,
                         &groupings,
                         &range_refs,
-                        self.dead_cards,
+                        self.dead_cards | self.certain_public_mask()?,
                         self.seed,
                         self.blocking_samples,
                     )?)
@@ -444,7 +531,7 @@ impl MultiwayHoldemSpotConfig {
         MultiwayHoldemBatchSolver::new(
             tree.clone(),
             self.ranges.clone(),
-            self.dead_cards,
+            self.dead_cards | self.certain_public_mask()?,
             self.seed,
             config_fingerprint,
             self.max_private_attempts,
@@ -749,6 +836,7 @@ mod tests {
             weight: 1.0,
         });
         MultiwayHoldemSpotConfig {
+            board_cards: Vec::new(),
             table,
             action_history: Vec::new(),
             ranges: vec![hero_range, range(&["Kc Kd"]), range(&["Qs Qh"])],
@@ -900,6 +988,7 @@ mod tests {
             .map(|text| WeightedRange::from_classes(&parse_range(text).unwrap()))
             .collect();
         let mut config = MultiwayHoldemSpotConfig {
+            board_cards: Vec::new(),
             table,
             action_history: vec![],
             ranges,
@@ -979,5 +1068,206 @@ mod tests {
         assert!(quiet_result.blocking_estimate.is_none());
         let quiet_json = quiet_result.to_json().unwrap();
         assert!(!quiet_json.contains("\"blocking\""));
+    }
+
+    #[test]
+    fn postflop_start_replays_srp_history_to_flop() {
+        let mut config = config();
+        config.action_history = vec![
+            MultiwayHoldemSpotAction {
+                player: 0,
+                action: Action::Raise { to: 5 },
+            },
+            MultiwayHoldemSpotAction {
+                player: 1,
+                action: Action::Fold,
+            },
+            MultiwayHoldemSpotAction {
+                player: 2,
+                action: Action::Call,
+            },
+        ];
+        config.board_cards = holdem_cards::cards_from_str("2s 3d 4c").unwrap();
+        config.hero_player = 2;
+        config.ranges[2] = range(&["Qs Qh"]);
+        config.hero_hands = vec![combo("Qs Qh")];
+        config.hero_label = "QQ".to_string();
+        let state = config.state_after_history().unwrap();
+        assert_eq!(state.street, Street::Flop);
+        assert_eq!(state.actor, Some(2));
+        assert_eq!(
+            state.board,
+            holdem_cards::cards_from_str("2s 3d 4c").unwrap()
+        );
+        assert_eq!(state.current_bet, 0);
+        assert_eq!(state.pot, 11);
+        // Full-дерево строится из флоп-старта: корень — узел решений.
+        let tree = config.build_tree().unwrap();
+        assert!(tree.nodes[0].chance.is_none());
+        assert!(tree.nodes[0].children.len() >= 2);
+    }
+
+    #[test]
+    fn postflop_start_round_mode_builds_round_tree() {
+        let mut config = config();
+        config.action_history = vec![
+            MultiwayHoldemSpotAction {
+                player: 0,
+                action: Action::Raise { to: 5 },
+            },
+            MultiwayHoldemSpotAction {
+                player: 1,
+                action: Action::Fold,
+            },
+            MultiwayHoldemSpotAction {
+                player: 2,
+                action: Action::Call,
+            },
+        ];
+        config.board_cards = holdem_cards::cards_from_str("2s 3d 4c").unwrap();
+        config.hero_player = 2;
+        config.ranges[2] = range(&["Qs Qh"]);
+        config.hero_hands = vec![combo("Qs Qh")];
+        config.tree = MultiwayHoldemSpotTreeConfig::Round(TreeBuildConfig {
+            action_sizes: holdem_domain::ActionSizes {
+                bet_to: vec![3],
+                raise_to: Vec::new(),
+                include_all_in: false,
+            },
+            abstraction: None,
+            max_nodes: 10_000,
+            max_depth: 32,
+        });
+        let tree = config.build_tree().unwrap();
+        let round_complete = tree
+            .leaf_nodes()
+            .any(|node| matches!(node.leaf.as_ref(), Some(LeafKind::RoundComplete)));
+        assert!(round_complete);
+    }
+
+    #[test]
+    fn postflop_start_consumes_street_boundaries_to_river() {
+        let mut config = config();
+        config.action_history = vec![
+            MultiwayHoldemSpotAction {
+                player: 0,
+                action: Action::Raise { to: 5 },
+            },
+            MultiwayHoldemSpotAction {
+                player: 1,
+                action: Action::Fold,
+            },
+            MultiwayHoldemSpotAction {
+                player: 2,
+                action: Action::Call,
+            },
+            MultiwayHoldemSpotAction {
+                player: 2,
+                action: Action::Check,
+            },
+            MultiwayHoldemSpotAction {
+                player: 0,
+                action: Action::Check,
+            },
+            MultiwayHoldemSpotAction {
+                player: 2,
+                action: Action::Check,
+            },
+            MultiwayHoldemSpotAction {
+                player: 0,
+                action: Action::Check,
+            },
+        ];
+        config.board_cards = holdem_cards::cards_from_str("2s 3d 4c 5h 6s").unwrap();
+        config.hero_player = 2;
+        config.ranges[2] = range(&["Qs Qh"]);
+        config.hero_hands = vec![combo("Qs Qh")];
+        let state = config.state_after_history().unwrap();
+        assert_eq!(state.street, Street::River);
+        assert_eq!(state.board.len(), 5);
+        assert_eq!(state.actor, Some(2));
+    }
+
+    #[test]
+    fn postflop_start_rejects_inconsistent_boards() {
+        // Борд длиннее закрытых улиц: карта осталась неиспользованной.
+        let mut longer = config();
+        longer.action_history = vec![
+            MultiwayHoldemSpotAction {
+                player: 0,
+                action: Action::Raise { to: 5 },
+            },
+            MultiwayHoldemSpotAction {
+                player: 1,
+                action: Action::Fold,
+            },
+            MultiwayHoldemSpotAction {
+                player: 2,
+                action: Action::Call,
+            },
+        ];
+        longer.board_cards = holdem_cards::cards_from_str("2s 3d 4c 5h").unwrap();
+        longer.hero_player = 2;
+        longer.ranges[2] = range(&["Qs Qh"]);
+        longer.hero_hands = vec![combo("Qs Qh")];
+        let error = longer.state_after_history().unwrap_err();
+        assert!(error.contains("unconsumed"));
+
+        // Длина борда вне {0, 3, 4, 5}: борд не расходуется историей.
+        let mut two_cards = config();
+        two_cards.board_cards = holdem_cards::cards_from_str("2s 7d").unwrap();
+        let error = two_cards.state_after_history().unwrap_err();
+        assert!(error.contains("unconsumed"));
+
+        // Прежняя ошибка сохранена: закрытый раунд без борда.
+        let mut closed = config();
+        closed.action_history = vec![
+            MultiwayHoldemSpotAction {
+                player: 0,
+                action: Action::Raise { to: 5 },
+            },
+            MultiwayHoldemSpotAction {
+                player: 1,
+                action: Action::Fold,
+            },
+            MultiwayHoldemSpotAction {
+                player: 2,
+                action: Action::Call,
+            },
+        ];
+        let error = closed.state_after_history().unwrap_err();
+        assert!(error.contains("between betting rounds"));
+        assert!(error.contains("between betting rounds"));
+    }
+
+    #[test]
+    fn postflop_start_solve_with_fixed_runout_and_wide_range() {
+        // Регрессия инцидента solve-смока: фиксированный ранаут (5h/6s из
+        // конфига) + широкий SB с картами ранаута. До фикса сэмплер
+        // генерировал невозможные дилы ("no legal public outcomes");
+        // certain-маска исключает их на этапе сэмплирования.
+        let mut config = config();
+        config.action_history = vec![
+            MultiwayHoldemSpotAction {
+                player: 0,
+                action: Action::Raise { to: 5 },
+            },
+            MultiwayHoldemSpotAction {
+                player: 1,
+                action: Action::Fold,
+            },
+            MultiwayHoldemSpotAction {
+                player: 2,
+                action: Action::Call,
+            },
+        ];
+        config.board_cards = holdem_cards::cards_from_str("2s 3d 4c").unwrap();
+        config.hero_player = 2;
+        config.ranges[1] = range(&["5h 4h", "3h 2h"]);
+        config.ranges[2] = range(&["Qs Qh"]);
+        config.hero_hands = vec![combo("Qs Qh")];
+        let result = config.solve(8, 1).unwrap();
+        assert_ne!(result.tree_fingerprint, 0);
+        assert!(!result.hero.observed_hands.is_empty());
     }
 }

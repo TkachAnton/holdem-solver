@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "table": {
+    "table_size": 3,
+    "button": 0,
+    "small_blind": 100,
+    "big_blind": 200,
+    "ante": 0,
+    "ante_mode": "none",
+    "stacks": [20000, 20000, 20000],
+    "dead_money": 0
+  },
+  "dead_cards": "",
+  "history": [
+    {"player": 0, "kind": "raise", "to": 500},
+    {"player": 1, "kind": "fold"},
+    {"player": 2, "kind": "call"}
+  ],
+  "board": "2s 7d 9c",
+  "ranges": [
+    {"range": "AA-77, AKs-A9s, KQs-KTs, QJs-QTs, JTs, AKo-A9o, KQo-KTo"},
+    {"range": "AA-22, AKs-A2s, KQs-K2s, QJs-Q2s, JTs-J2s, T9s-T2s, 98s-92s, 87s-82s, 76s-72s, 65s-62s, 54s-52s, 43s-42s, 32s, AKo-A2o, KQo-K2o, QJo-Q2o, JTo-J2o, T9o-T2o, 98o-92o, 87o-82o, 76o-72o, 65o-62o, 54o-52o, 43o-42o, 32o"},
+    {"range": "AA-22, AKs-A2s, KQs-K5s, QJs-Q8s, J9s-J8s, T8s, 97s, 87s, 76s, 65s, 54s, AKo-A2o, KQo-K9o, QJo-Q9o, JTo-J9o, T9o, 98o, 87o"}
+  ],
+  "hero": {
+    "player": 2,
+    "hand": "AJo",
+    "label": "BB AJo"
+  },
+  "tree": {
+    "mode": "full",
+    "max_nodes": 100000,
+    "max_depth": 64,
+    "preflop": {},
+    "flop": {"bet_fractions": [0.33, 0.66], "raise_multipliers": [3.0]},
+    "turn": {"bet_fractions": [0.33, 0.66], "raise_multipliers": [3.0]},
+    "river": {"bet_fractions": [0.33, 0.66], "raise_multipliers": [3.0]},
+    "chance": {
+      "flop": [],
+      "turn": [{"cards": "5h", "probability": 1.0}],
+      "river": [{"cards": "3h", "probability": 1.0}],
+      "enumerate_exact": false,
+      "max_outcomes_per_node": 10000
+    }
+  },
+  "execution": {
+    "seed": 20260924,
+    "target_iterations": 10000,
+    "checkpoint_interval": 1000,
+    "keep_checkpoints": 5,
+    "max_private_attempts": 100000,
+    "worker_count": 4,
+    "reduction_batch_size": 8,
+    "config_fingerprint": 0
+  }
+}
