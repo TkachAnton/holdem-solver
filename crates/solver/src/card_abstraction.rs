@@ -674,6 +674,7 @@ mod tests {
                 river: Some(river.iter().map(|text| outcome(text)).collect()),
                 enumerate_exact: false,
                 max_outcomes_per_node: 10_000,
+                dead_cards: 0,
             },
             postflop_order: vec![1, 0],
         };

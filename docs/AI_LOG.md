@@ -749,3 +749,45 @@ build_solver; валидация mode/granularity; условность исхо
 коммит); затем HU-гварды; UI — по D-023(6б) после каркаса движка.
 Замеры: кривые выше; mockup.html 436 строк + 72.5 KB данных;
 PS-агрегация больших JSON — минуты (инцидент 3).
+
+### Сессия 18 — 2026-09-26 — enumerate-фильтр: баг корректности закрыт
+Цель: enumerate×dead_cards — enumerate_exact строил исходы, конфликтующие
+с известными картами: невозможные ветви, смещённые вероятности.
+Публичный путь: job-JSON (chance.enumerate_exact + dead_cards).
+Сделано:
+* Воспроизведение (4 попытки с уроками: объём — до запуска; dead без
+  пересечения с hero/board/runouts; малые итерации — hero не посещён;
+  юнит-скретч build_full — ЗЕЛЁНЫЙ на kc_hits>0: байтовое свидетельство
+  через public API).
+* Фикс (В1): ChanceConfig.dead_cards: DeckMask (default 0 — путь без
+  dead байт-идентичен); existing_mask |= dead в chance_outcomes; хеш
+  в fingerprint; проводка из spot (dead|board) -> into_chance_config.
+* 8 тест-литералов дополнены dead_cards: 0 (6 в src: drill, holdem x2,
+  multiway_spot x2, card_abstraction; 2 в tests/: realistic_pipeline,
+  multiway_realistic).
+* Постоянный регрессионный тест enumerate_excludes_dead_cards (tree):
+  Kc=0, 47 исходов, сумма 1.0.
+* E2E (release): validate enumerate+dead джоба зелёный, tree_nodes
+  45197 — дерево с фильтром строится в production-пути.
+* Пины: 8max 13077678885480782512, SRP 8033291308632370283 — не задеты.
+Инциденты (все до коммита):
+  (1) Тест-дизайн x2 (объём; совместимость dead).
+  (2) tests/-директория до записи; saved после верификации.
+  (3) «Правка в памяти без Save» x3 — фикс процесса: Save немедленно
+      за правкой, гвард-перечитка той же строкой.
+  (4) Якорь-память x3 — гвард обязан знать контекст (легитимные
+      шортхенды существующих литералов).
+  (5) R5 в трёх слоях: cargo check не видит cfg(test); lib-гейт видит
+      src-тесты; workspace-гейт видит tests/*.rs — полная пирамида
+      проверяется только workspace-гейтом. Новые struct-поля — гейт
+      cargo test --workspace сразу, не check.
+Решения: enumerate×dead закрыт (первый долг ядра); D-020(3) семантика
+расширена: единая known-cards маска (dead|board) питает сэмплер и
+enumerate-фильтр.
+Открытые вопросы: HU-гварды 3..=8; дедупликация build_solver;
+валидация mode/granularity; условность исходов; переменный борд;
+V-таблица; UI-хвост D-023(6б).
+Следующий шаг: HU-гварды (3..=8 -> 2..=8, два места + аудит batch
+на 2 игроков + тесты).
+Замеры (release): e2e validate enumerate+dead: tree_nodes 45197;
+workspace 167 passed + 7 ignored (26 таргетов), 0 failed.

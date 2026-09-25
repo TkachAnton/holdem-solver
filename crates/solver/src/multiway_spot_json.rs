@@ -362,7 +362,7 @@ impl MultiwayHoldemSpotJob {
             .map(|spec| spec.blocking_samples)
             .unwrap_or(0);
         let preflop_sizing = self.tree.preflop.clone().into_sizing();
-        let tree = self.tree.into_tree_config()?;
+        let tree = self.tree.into_tree_config(dead_cards | board_mask)?;
         validate_postflop_start(&tree, &preflop_sizing, &board_cards)?;
         let execution = self.execution;
         let mut config = MultiwayHoldemSpotConfig {
@@ -526,7 +526,10 @@ impl MultiwayHoldemSpotRangeJson {
 }
 
 impl MultiwayHoldemSpotTreeJson {
-    fn into_tree_config(self) -> Result<MultiwayHoldemSpotTreeConfig, String> {
+    fn into_tree_config(
+        self,
+        dead_cards: DeckMask,
+    ) -> Result<MultiwayHoldemSpotTreeConfig, String> {
         let round = TreeBuildConfig {
             action_sizes: ActionSizes::default(),
             abstraction: Some(ActionAbstraction {
@@ -542,7 +545,7 @@ impl MultiwayHoldemSpotTreeJson {
             return Ok(MultiwayHoldemSpotTreeConfig::Round(round));
         }
 
-        let chance = self.chance.into_chance_config()?;
+        let chance = self.chance.into_chance_config(dead_cards)?;
         Ok(MultiwayHoldemSpotTreeConfig::Full(FullTreeBuildConfig {
             round,
             chance,
@@ -564,13 +567,14 @@ impl MultiwayHoldemSpotStreetJson {
 }
 
 impl MultiwayHoldemSpotChanceJson {
-    fn into_chance_config(self) -> Result<ChanceConfig, String> {
+    fn into_chance_config(self, dead_cards: DeckMask) -> Result<ChanceConfig, String> {
         Ok(ChanceConfig {
             flop: optional_outcomes(self.flop)?,
             turn: optional_outcomes(self.turn)?,
             river: optional_outcomes(self.river)?,
             enumerate_exact: self.enumerate_exact,
             max_outcomes_per_node: self.max_outcomes_per_node,
+            dead_cards,
         })
     }
 }

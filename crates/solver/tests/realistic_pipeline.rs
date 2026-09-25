@@ -68,6 +68,7 @@ fn realistic_tree_config() -> FullTreeBuildConfig {
             river: Some(vec![ChanceOutcome::new(cards_from_str("Qh").unwrap(), 1.0)]),
             enumerate_exact: false,
             max_outcomes_per_node: 4,
+            dead_cards: 0,
         },
         postflop_order: vec![1, 0],
     }

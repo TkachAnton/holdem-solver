@@ -428,6 +428,7 @@ mod tests {
                     river: Some(vec![ChanceOutcome::new(cards_from_str("6s").unwrap(), 1.0)]),
                     enumerate_exact: false,
                     max_outcomes_per_node: 10,
+                    dead_cards: 0,
                 },
                 postflop_order: Vec::new(),
             }),

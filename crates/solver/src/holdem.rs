@@ -1878,6 +1878,7 @@ mod tests {
                 )]),
                 enumerate_exact: false,
                 max_outcomes_per_node: 10,
+                dead_cards: 0,
             },
             postflop_order: vec![1, 0],
         };
@@ -1931,6 +1932,7 @@ mod tests {
                 )]),
                 enumerate_exact: false,
                 max_outcomes_per_node: 10,
+                dead_cards: 0,
             },
             postflop_order: vec![1, 0],
         };

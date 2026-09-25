@@ -10,6 +10,7 @@ use holdem_domain::{Action, ActionSizes, GameState, PlayerId, Street, TerminalSt
 
 pub mod action_abstraction;
 use action_abstraction::ActionAbstraction;
+use holdem_cards::DeckMask;
 
 pub type NodeId = usize;
 
@@ -240,6 +241,9 @@ pub struct ChanceConfig {
     pub turn: Option<Vec<ChanceOutcome>>,
     pub river: Option<Vec<ChanceOutcome>>,
     pub enumerate_exact: bool,
+    /// Известные вне игры карты (dead/hero/стартовый борд): enumerate
+    /// исключает их из исходов улиц. 0 = прежнее поведение байт-в-байт.
+    pub dead_cards: DeckMask,
     pub max_outcomes_per_node: usize,
 }
 
@@ -250,6 +254,7 @@ impl Default for ChanceConfig {
             turn: None,
             river: None,
             enumerate_exact: false,
+            dead_cards: 0,
             max_outcomes_per_node: 10_000,
         }
     }
@@ -277,6 +282,7 @@ impl ChanceConfig {
         let hash = hash_outcomes(hash, &self.turn);
         let hash = hash_outcomes(hash, &self.river);
         let hash = tree_hash_value(hash, self.enumerate_exact as u64);
+        let hash = tree_hash_value(hash, self.dead_cards);
         tree_hash_value(hash, self.max_outcomes_per_node as u64)
     }
 }
@@ -556,7 +562,8 @@ fn chance_outcomes(
         ));
     }
 
-    let existing_mask = mask_from_cards(&state.board).map_err(|error| error.to_string())?;
+    let existing_mask =
+        mask_from_cards(&state.board).map_err(|error| error.to_string())? | config.dead_cards;
     let remaining: Vec<Card> = cards_from_mask(!existing_mask & ((1u64 << 52) - 1));
     let needed = state.street.required_new_board_cards();
     let mut outcomes = Vec::new();
@@ -723,6 +730,7 @@ mod tests {
                 turn: Some(vec![ChanceOutcome::new(cards_from_str("Kh").unwrap(), 1.0)]),
                 river: Some(vec![ChanceOutcome::new(cards_from_str("Qc").unwrap(), 1.0)]),
                 enumerate_exact: false,
+                dead_cards: 0,
                 max_outcomes_per_node: 100,
             },
             postflop_order: vec![1, 0],
@@ -754,6 +762,7 @@ mod tests {
                 turn: Some(vec![ChanceOutcome::new(cards_from_str("Td").unwrap(), 1.0)]),
                 river: Some(vec![ChanceOutcome::new(cards_from_str("9s").unwrap(), 1.0)]),
                 enumerate_exact: false,
+                dead_cards: 0,
                 max_outcomes_per_node: 100,
             },
             postflop_order: vec![1, 0],

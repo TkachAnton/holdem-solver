@@ -77,6 +77,7 @@ fn three_way_tree() -> (holdem_tree::GameTree, u64) {
             river: Some(vec![ChanceOutcome::new(cards_from_str("Qh").unwrap(), 1.0)]),
             enumerate_exact: false,
             max_outcomes_per_node: 4,
+            dead_cards: 0,
         },
         postflop_order: vec![1, 2, 0],
     };
