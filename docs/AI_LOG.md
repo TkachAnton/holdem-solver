@@ -671,4 +671,4 @@ V-таблица D-021(7), резюм сессии дрилла, мгновен�
 Замеры (release, i5-2500K): мини file-redirect (1 рука, 4 дилa):
 0.3 c; полный смоук (200 итераций солвера, 10 рук, 32 дилa):
 8.9 c, average_loss_chips 59.12576146264679 (average_loss_bb
-unknown); workspace: 167 passed + 7 ignored (26 таргетов), 0 failed.
+0.295628807313234); workspace: 167 passed + 7 ignored (26 таргетов), 0 failed.
