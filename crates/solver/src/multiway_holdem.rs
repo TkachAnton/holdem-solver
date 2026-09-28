@@ -27,7 +27,7 @@ pub struct MultiwayPrivateDeal {
     pub hands: Vec<Combo>,
 }
 
-/// Expands exact weighted ranges into legal 3-8 player private deals.
+/// Expands exact weighted ranges into legal 2-8 player private deals.
 ///
 /// The product is conditioned on all hands being pairwise legal and on
 /// `dead_cards`. `max_deals` is mandatory as a safety guard because the exact
@@ -37,9 +37,9 @@ pub fn multiway_private_deals_from_ranges(
     dead_cards: DeckMask,
     max_deals: usize,
 ) -> Result<Vec<MultiwayPrivateDeal>, String> {
-    if !(3..=8).contains(&ranges.len()) {
+    if !(2..=8).contains(&ranges.len()) {
         return Err(format!(
-            "multiway private deals require 3-8 ranges, got {}",
+            "multiway private deals require 2-8 ranges, got {}",
             ranges.len()
         ));
     }
@@ -187,9 +187,9 @@ fn sampler_fingerprint(dead_cards: DeckMask, candidates: &[Vec<(Combo, f64)>]) -
 
 impl MultiwayPrivateDealSampler {
     pub fn new(ranges: &[&WeightedRange], dead_cards: DeckMask, seed: u64) -> Result<Self, String> {
-        if !(3..=8).contains(&ranges.len()) {
+        if !(2..=8).contains(&ranges.len()) {
             return Err(format!(
-                "multiway private sampler requires 3-8 ranges, got {}",
+                "multiway private sampler requires 2-8 ranges, got {}",
                 ranges.len()
             ));
         }
@@ -403,9 +403,9 @@ pub struct MultiwayHoldemChipEvPayoff {
 
 impl MultiwayHoldemChipEvPayoff {
     pub fn new(hands: Vec<Combo>) -> Result<Self, String> {
-        if !(3..=8).contains(&hands.len()) {
+        if !(2..=8).contains(&hands.len()) {
             return Err(format!(
-                "multiway Hold'em payoff requires 3-8 hands, got {}",
+                "multiway Hold'em payoff requires 2-8 hands, got {}",
                 hands.len()
             ));
         }
@@ -537,9 +537,9 @@ pub fn compile_multiway_holdem_tree(
         .ok_or_else(|| "tree root is missing".to_string())?
         .state
         .table_size;
-    if !(3..=8).contains(&player_count) {
+    if !(2..=8).contains(&player_count) {
         return Err(format!(
-            "multiway Hold'em compiler requires 3-8 seats, got {player_count}"
+            "multiway Hold'em compiler requires 2-8 seats, got {player_count}"
         ));
     }
 

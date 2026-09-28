@@ -404,8 +404,8 @@ impl MultiwayHoldemSpotConfig {
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        if !(3..=8).contains(&self.table.table_size) {
-            return Err("multiway spot requires a 3-8 player table".to_string());
+        if !(2..=8).contains(&self.table.table_size) {
+            return Err("multiway spot requires a 2-8 player table".to_string());
         }
         if self.ranges.len() != self.table.table_size {
             return Err(format!(
@@ -1491,5 +1491,95 @@ mod tests {
         // без сэмплов в JSON нет ни блока, ни ключа.
         let json = result.to_json().unwrap();
         assert!(!json.contains("\"exploitability\""));
+    }
+
+    #[test]
+    fn hu_two_player_spot_full_pipeline() {
+        // Сессия 19: HU-гварды 3..=8 -> 2..=8. HU SRP (BTN=SB open, BB call,
+        // флоп-старт по T4.1) обязан проходить весь путь: validate ->
+        // state_after_history -> build_tree -> solve. Ранее валидация
+        // отвергала table_size=2 («multiway spot requires a 3-8 player table»).
+        let table = TableConfig {
+            table_size: 2,
+            button: 0,
+            small_blind: 1,
+            big_blind: 2,
+            ante: 0,
+            ante_mode: AnteMode::None,
+            stacks: vec![100, 100],
+            dead_money: 0,
+        };
+        let config = MultiwayHoldemSpotConfig {
+            table,
+            action_history: vec![
+                MultiwayHoldemSpotAction {
+                    player: 0,
+                    action: Action::Raise { to: 5 },
+                },
+                MultiwayHoldemSpotAction {
+                    player: 1,
+                    action: Action::Call,
+                },
+            ],
+            ranges: vec![range(&["As Ah"]), range(&["Kc Kd"])],
+            dead_cards: 0,
+            board_cards: holdem_cards::cards_from_str("2s 3d 4c").unwrap(),
+            tree: MultiwayHoldemSpotTreeConfig::Full(FullTreeBuildConfig {
+                round: TreeBuildConfig {
+                    action_sizes: holdem_domain::ActionSizes {
+                        bet_to: vec![3, 6],
+                        raise_to: vec![8, 12],
+                        include_all_in: false,
+                    },
+                    abstraction: None,
+                    max_nodes: 100_000,
+                    max_depth: 32,
+                },
+                chance: ChanceConfig {
+                    flop: Some(vec![ChanceOutcome::new(
+                        holdem_cards::cards_from_str("2s 3d 4c").unwrap(),
+                        1.0,
+                    )]),
+                    turn: Some(vec![ChanceOutcome::new(
+                        holdem_cards::cards_from_str("5h").unwrap(),
+                        1.0,
+                    )]),
+                    river: Some(vec![ChanceOutcome::new(
+                        holdem_cards::cards_from_str("6s").unwrap(),
+                        1.0,
+                    )]),
+                    enumerate_exact: false,
+                    max_outcomes_per_node: 10,
+                    dead_cards: 0,
+                },
+                postflop_order: Vec::new(),
+            }),
+            hero_player: 1,
+            hero_hands: vec![combo("Kc Kd")],
+            hero_label: "HU BB KK".to_string(),
+            seed: 7,
+            config_fingerprint: 0,
+            max_private_attempts: 1000,
+            worker_count: 1,
+            reduction_batch_size: 1,
+            exploitability_samples: 0,
+            card_abstraction: None,
+            blocking_samples: 0,
+        };
+        config.validate().unwrap();
+        let state = config.state_after_history().unwrap();
+        assert_eq!(state.street, Street::Flop);
+        assert_eq!(
+            state.board,
+            holdem_cards::cards_from_str("2s 3d 4c").unwrap()
+        );
+        // HU постфлоп: BB (player 1) действует первым — домен, table.rs:106-108.
+        assert_eq!(state.actor, Some(1));
+        assert_eq!(state.pot, 10);
+        let tree = config.build_tree().unwrap();
+        assert!(tree.nodes.len() > 1);
+        // Полный аудит 2-игроков: арена, сэмплер, компилятор, пэйофф.
+        let result = config.solve(8, 1).unwrap();
+        assert!(!result.hero.observed_hands.is_empty());
     }
 }

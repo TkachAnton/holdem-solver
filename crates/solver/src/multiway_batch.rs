@@ -413,8 +413,8 @@ impl MultiwayHoldemBatchCheckpoint {
                 self.format_version
             ));
         }
-        if !(3..=8).contains(&self.player_count) {
-            return Err("multiway batch checkpoint player count must be 3-8".to_string());
+        if !(2..=8).contains(&self.player_count) {
+            return Err("multiway batch checkpoint player count must be 2-8".to_string());
         }
         if self.max_private_attempts == 0 {
             return Err("multiway batch checkpoint has zero private-attempt limit".to_string());
@@ -739,9 +739,9 @@ impl MultiwayHoldemPublicArena {
             .ok_or_else(|| "public arena tree root is missing".to_string())?
             .state
             .table_size;
-        if !(3..=8).contains(&player_count) {
+        if !(2..=8).contains(&player_count) {
             return Err(format!(
-                "public multiway arena requires 3-8 seats, got {player_count}"
+                "public multiway arena requires 2-8 seats, got {player_count}"
             ));
         }
         Ok(Self {
@@ -879,9 +879,9 @@ impl MultiwayHoldemBatchSolver {
             return Err("max_private_attempts must be positive".to_string());
         }
         let player_count = public_arena.player_count();
-        if !(3..=8).contains(&player_count) || ranges.len() != player_count {
+        if !(2..=8).contains(&player_count) || ranges.len() != player_count {
             return Err(format!(
-                "batch solver requires 3-8 ranges matching table size {}, got {}",
+                "batch solver requires 2-8 ranges matching table size {}, got {}",
                 player_count,
                 ranges.len()
             ));

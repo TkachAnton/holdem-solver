@@ -107,8 +107,8 @@ impl MultiwayBatchJobManifest {
             return Err("multiway batch job id cannot be empty".to_string());
         }
         self.config.validate()?;
-        if !(3..=8).contains(&self.player_count) {
-            return Err("multiway batch job player count must be 3-8".to_string());
+        if !(2..=8).contains(&self.player_count) {
+            return Err("multiway batch job player count must be 2-8".to_string());
         }
         if self.completed_iterations > self.config.target_iterations {
             return Err("multiway batch job completed iterations exceed target".to_string());
