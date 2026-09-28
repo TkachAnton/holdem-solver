@@ -845,3 +845,23 @@ mode/granularity; условность исходов; переменный бо
 UI-хвост D-023(6б); док-строка multiway.rs (косметика).
 Следующий шаг: валидация mode/granularity (жёсткие ошибки вместо
 soft-fallback в into_spec — D-013/D-019(5)-долг) — малый fix-цикл.
+
+Сделано (fix-цикл №2: валидация mode/granularity, один коммит):
+* multiway_spot_json.rs: into_spec -> Result — неизвестные
+  mode/granularity = жёсткие ошибки с текстом ожидаемых значений
+  (долг D-019(5); был мягкий fallback Fine/structural — «тихий
+  сюрприз» против D-013); "structural" — явная ветка, поведение
+  прежнее; call-site .transpose()?.
+* CLI *-clusters: уже строги, правок 0.
+* Тест: 2 негатива + пин 2x3 легальных пар; e2e: solve со спекой
+  structural/coarse зелёный (блок card_abstraction в result),
+  негативный e2e — unknown mode отвергается до дерева.
+* Пины 8max/SRP не задеты.
+Инцидент: 1 харнесс (ParseError: не-канонический вызов .NET-метода в
+else-ветке + 4 аргумента у 3-параметрического AppendAllText) — диск
+не тронут, повтор блока с одной строкой; правочных стопов 0.
+Замеры (release): e2e spec solve 50 итераций: 30 c; lib 61+1;
+ws 169 passed + 7 ignored (26 таргетов), 0 failed.
+Открытые вопросы: дедупликация build_solver; условность исходов;
+переменный борд; V-таблица; UI-хвост D-023(6б); док-строка multiway.rs.
+Следующий шаг: дедупликация build_solver либо переменный борд.

@@ -353,7 +353,8 @@ impl MultiwayHoldemSpotJob {
             .chance
             .card_abstraction
             .clone()
-            .map(CardAbstractionJson::into_spec);
+            .map(CardAbstractionJson::into_spec)
+            .transpose()?;
         let blocking_samples = self
             .tree
             .chance
@@ -459,18 +460,30 @@ fn validate_postflop_start(
 use holdem_solver_abstraction::Granularity;
 
 impl CardAbstractionJson {
-    fn into_spec(self) -> crate::card_abstraction::CardAbstractionSpec {
+    fn into_spec(self) -> Result<crate::card_abstraction::CardAbstractionSpec, String> {
         let granularity = match self.granularity.as_str() {
             "coarse" => Granularity::Coarse,
             "medium" => Granularity::Medium,
-            _ => Granularity::Fine,
+            "fine" => Granularity::Fine,
+            other => {
+                return Err(format!(
+                    "unknown card abstraction granularity {other:?}: expected coarse, medium or fine"
+                ));
+            }
         };
         match self.mode.as_str() {
-            "equity" => crate::card_abstraction::CardAbstractionSpec::equity(
+            "structural" => Ok(crate::card_abstraction::CardAbstractionSpec::structural(
+                granularity,
+            )),
+            "equity" => Ok(crate::card_abstraction::CardAbstractionSpec::equity(
                 granularity,
                 self.equity_groups.unwrap_or(4),
-            ),
-            _ => crate::card_abstraction::CardAbstractionSpec::structural(granularity),
+            )),
+            other => {
+                return Err(format!(
+                    "unknown card abstraction mode {other:?}: expected structural or equity"
+                ));
+            }
         }
     }
 }
@@ -858,5 +871,50 @@ mod tests {
         let json = job.to_json().unwrap();
         let decoded = MultiwayHoldemSpotJob::from_json(&json).unwrap();
         assert_eq!(decoded.execution.exploitability_samples, 7);
+    }
+
+    #[test]
+    fn json_abstraction_spec_rejects_unknown_mode_and_granularity() {
+        // D-019(5)/D-013: тихий fallback structural/fine запрещён —
+        // неизвестные mode/granularity обязаны быть жёсткой ошибкой парсинга.
+        let mut job = sample_job();
+        job.tree.chance.card_abstraction = Some(CardAbstractionJson {
+            mode: "struktural".to_string(),
+            granularity: "coarse".to_string(),
+            equity_groups: None,
+            blocking_samples: 0,
+        });
+        let error = job.into_config().unwrap_err();
+        assert!(error.contains("mode"), "mode error: {error}");
+
+        let mut job = sample_job();
+        job.tree.chance.card_abstraction = Some(CardAbstractionJson {
+            mode: "structural".to_string(),
+            granularity: "finest".to_string(),
+            equity_groups: None,
+            blocking_samples: 0,
+        });
+        let error = job.into_config().unwrap_err();
+        assert!(error.contains("granularity"), "granularity error: {error}");
+
+        // Позитивный пин: все легальные пары парсятся без спека-ошибок.
+        for granularity in ["coarse", "medium", "fine"] {
+            for mode in ["structural", "equity"] {
+                let mut job = sample_job();
+                job.tree.chance.card_abstraction = Some(CardAbstractionJson {
+                    mode: mode.to_string(),
+                    granularity: granularity.to_string(),
+                    equity_groups: None,
+                    blocking_samples: 0,
+                });
+                match job.into_config() {
+                    Ok(_) => {}
+                    Err(error) => assert!(
+                        !error.contains("mode") && !error.contains("granularity"),
+                        "неожиданная ошибка спеки: {error}"
+                    ),
+                }
+            }
+        }
     }
 }
