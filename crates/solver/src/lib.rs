@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
+pub mod blueprint;
 pub mod drill;
 pub mod holdem;
 pub mod multiway;
