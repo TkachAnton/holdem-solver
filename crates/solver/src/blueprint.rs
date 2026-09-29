@@ -215,6 +215,276 @@ pub fn carved_spot_job_json(
     })
 }
 
+// ============================================================================
+// T5.2 ч.3 (D-025(3)): обходчик каркаса -> MultiwayStaticGame.
+//
+// Каркас (Round-дерево) не проходит compile_multiway_holdem_tree — его
+// RoundComplete-листья «не имеют пэйоффа» (гварды компилятора и
+// ChipEvPayoff). Обходчик строит MultiwayStaticGame напрямую, нуля правок
+// существующих файлов: узлы решений -> Decision (инфосет = детерминированный
+// хеш (player, node_id)); Terminal::Fold -> Terminal{utility} копией
+// семантики ChipEvPayoff (winner забирает банк; фолднувшие теряют
+// вложенное — читается из committed_street узла); RoundComplete ->
+// Terminal{utility} из таблицы EV-листьев (решённые споты), недостающие
+// — нули с подсчётом покрытия. Поверх — готовый MultiwayMccfrSolver.
+// ============================================================================
+
+use std::collections::HashMap;
+
+use holdem_domain::TerminalState;
+
+use crate::multiway::{MultiwayGameNode, MultiwayStaticGame};
+
+/// EV-листья каркаса: node_id -> utility-вектор по игрокам
+/// (источник — решения спотов T5.2 ч.1; недостающий лист = нули).
+#[derive(Debug, Clone, Default)]
+pub struct BlueprintLeafEv {
+    entries: HashMap<usize, Vec<f64>>,
+    player_count: usize,
+}
+
+impl BlueprintLeafEv {
+    pub fn new(player_count: usize) -> Self {
+        Self {
+            entries: HashMap::new(),
+            player_count,
+        }
+    }
+
+    /// Записывает EV-вектор листа (длина обязана равняться player_count).
+    pub fn set(&mut self, leaf: usize, utility: Vec<f64>) -> Result<(), String> {
+        if utility.len() != self.player_count {
+            return Err(format!(
+                "leaf EV vector has {} entries, expected {}",
+                utility.len(),
+                self.player_count
+            ));
+        }
+        self.entries.insert(leaf, utility);
+        Ok(())
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    fn get(&self, leaf: usize) -> Vec<f64> {
+        self.entries
+            .get(&leaf)
+            .cloned()
+            .unwrap_or_else(|| vec![0.0; self.player_count])
+    }
+}
+
+/// Результат сборки игры из каркаса.
+#[derive(Debug)]
+pub struct BlueprintGameBuild {
+    pub game: MultiwayStaticGame,
+    /// RoundComplete-листья каркаса, не покрытые EV-таблицей (нули).
+    pub uncovered_leaves: usize,
+    /// Всего RoundComplete-листьев.
+    pub total_leaves: usize,
+}
+
+/// Детерминированный идентификатор инфосета узла каркаса:
+/// FNV-1a от (player, node_id) — дубли невозможны (id уникальны),
+/// стабильный между прогонами (сопоставим с fingerprint-подходом
+/// компилятора по :212-217 multiway.rs).
+fn blueprint_infoset(player: usize, node_id: usize) -> u64 {
+    const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV_PRIME: u64 = 0x0000_0001_0000_01b3;
+    let mut hash = FNV_OFFSET;
+    for value in [player as u64, node_id as u64] {
+        for byte in value.to_le_bytes() {
+            hash ^= byte as u64;
+            hash = hash.wrapping_mul(FNV_PRIME);
+        }
+    }
+    hash
+}
+
+/// Собирает MultiwayStaticGame из каркаса (Round-дерева) с EV-листьями.
+///
+/// Идентична топологии каркаса 1:1 (тот же порядок узлов); фолд-терминалы
+/// получают утилити по семантике ChipEvPayoff (:451-461): победитель
+/// фолда забирает банк; каждый игрок теряет committed_street (его
+/// вложения уже в банке — utility измеряет итог раздачи: победитель
+/// +pot − свои вложения, остальные −вложения).
+pub fn blueprint_game(
+    tree: &GameTree,
+    player_count: usize,
+    leaf_ev: &BlueprintLeafEv,
+) -> Result<BlueprintGameBuild, String> {
+    if player_count == 0 {
+        return Err("blueprint game requires a positive player count".to_string());
+    }
+
+    let mut nodes: Vec<MultiwayGameNode> = Vec::with_capacity(tree.nodes.len());
+    let mut uncovered_leaves = 0usize;
+    let mut total_leaves = 0usize;
+
+    // Один проход: узлы каркаса в том же порядке (id = индекс).
+    for node in &tree.nodes {
+        let game_node = if let Some(leaf) = &node.leaf {
+            match leaf {
+                LeafKind::Terminal(TerminalState::Fold { winner }) => {
+                    let mut utility = vec![0.0; player_count];
+                    for (player, value) in utility.iter_mut().enumerate() {
+                        let committed = node
+                            .state
+                            .players
+                            .iter()
+                            .find(|p| p.seat == player)
+                            .map(|p| p.committed_total)
+                            .unwrap_or(0);
+                        *value = if player == *winner {
+                            node.state.pot as f64 - committed as f64
+                        } else {
+                            -(committed as f64)
+                        };
+                    }
+                    MultiwayGameNode::Terminal { utility }
+                }
+                LeafKind::Terminal(TerminalState::Showdown) => {
+                    return Err(format!(
+                        "blueprint round tree contains a showdown terminal at node {}",
+                        node.id
+                    ));
+                }
+                LeafKind::RoundComplete => {
+                    total_leaves += 1;
+                    let utility = leaf_ev.get(node.id);
+                    if !leaf_ev.entries.contains_key(&node.id) {
+                        uncovered_leaves += 1;
+                    }
+                    MultiwayGameNode::Terminal { utility }
+                }
+            }
+        } else {
+            let player = node
+                .state
+                .actor
+                .ok_or_else(|| format!("blueprint node {} has no actor", node.id))?;
+            if player >= player_count {
+                return Err(format!(
+                    "blueprint node {} actor {player} is outside player count",
+                    node.id
+                ));
+            }
+            MultiwayGameNode::Decision {
+                player,
+                infoset: blueprint_infoset(player, node.id),
+                children: node.children.clone(),
+            }
+        };
+        nodes.push(game_node);
+    }
+
+    let game = MultiwayStaticGame::new(player_count, tree.root, nodes)?;
+    Ok(BlueprintGameBuild {
+        game,
+        uncovered_leaves,
+        total_leaves,
+    })
+}
+
+// ============================================================================
+// T5.2 ч.3 (D-025(3)): каркасный MCCFR-раунд + веса путей.
+//
+// Итерация блюпринта: MCCFR на MultiwayStaticGame каркаса (EV-листья из
+// спотов) даёт средние префлоп-стратегии; из них считаются веса путей
+// листьев — приоритизация спотов следующего раунда (top-K по весу).
+// ============================================================================
+
+use crate::multiway::MultiwayMccfrSolver;
+
+/// Результат каркасного раунда MCCFR.
+#[derive(Debug)]
+pub struct BlueprintRound {
+    /// Средние префлоп-стратегии: (player, infoset) -> частоты действий.
+    pub strategies: HashMap<(usize, u64), Vec<f64>>,
+    /// Веса RoundComplete-листьев (произведение частот пути; сумма
+    /// вместе с весами фолд-терминалов = 1).
+    pub leaf_weights: HashMap<usize, f64>,
+    /// Число итераций MCCFR.
+    pub iterations: u64,
+}
+
+/// Прогон каркасного раунда: MCCFR на собранной игре каркаса.
+pub fn blueprint_round(
+    tree: &GameTree,
+    player_count: usize,
+    leaf_ev: &BlueprintLeafEv,
+    iterations: u64,
+    seed: u64,
+) -> Result<BlueprintRound, String> {
+    if iterations == 0 {
+        return Err("blueprint round requires a positive iteration count".to_string());
+    }
+    let build = blueprint_game(tree, player_count, leaf_ev)?;
+    let mut solver = MultiwayMccfrSolver::new(build.game, seed, 0)?;
+    solver.run(iterations)?;
+
+    // Средние стратегии всех посещённых инфосетов.
+    let mut strategies: HashMap<(usize, u64), Vec<f64>> = HashMap::new();
+    // Веса листьев: DFS от корня, произведение средних частот.
+    let mut leaf_weights: HashMap<usize, f64> = HashMap::new();
+    let mut fold_weight = 0.0_f64;
+
+    // Явный стек DFS: (node_id, weight).
+    let mut stack: Vec<(usize, f64)> = vec![(tree.root, 1.0)];
+    while let Some((node_id, weight)) = stack.pop() {
+        let node = &tree.nodes[node_id];
+        if let Some(leaf) = &node.leaf {
+            match leaf {
+                LeafKind::RoundComplete => {
+                    leaf_weights.insert(node_id, weight);
+                }
+                LeafKind::Terminal(_) => {
+                    fold_weight += weight;
+                }
+            }
+            continue;
+        }
+        let player = node
+            .state
+            .actor
+            .ok_or_else(|| format!("blueprint node {node_id} has no actor"))?;
+        let infoset = blueprint_infoset(player, node_id);
+        let frequencies = solver
+            .average_strategy(player, infoset)
+            .unwrap_or_else(|| vec![1.0 / node.children.len() as f64; node.children.len()]);
+        if frequencies.len() != node.children.len() {
+            return Err(format!(
+                "strategy at node {node_id} has {} actions, tree has {}",
+                frequencies.len(),
+                node.children.len()
+            ));
+        }
+        strategies.insert((player, infoset), frequencies.clone());
+        for (index, &child) in node.children.iter().enumerate() {
+            stack.push((child, weight * frequencies[index]));
+        }
+    }
+
+    let total: f64 = leaf_weights.values().sum::<f64>() + fold_weight;
+    if (total - 1.0).abs() > 1e-6 {
+        return Err(format!(
+            "blueprint path weights sum to {total}, expected 1.0"
+        ));
+    }
+
+    Ok(BlueprintRound {
+        strategies,
+        leaf_weights,
+        iterations,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -305,5 +575,189 @@ mod tests {
             }
         }
         assert!(count > 0);
+    }
+
+    // ===== T5.2 ч.3: обходчик blueprint_game =====
+
+    fn leaf_ev_none(player_count: usize) -> BlueprintLeafEv {
+        BlueprintLeafEv::new(player_count)
+    }
+
+    #[test]
+    fn blueprint_game_builds_valid_static_game() {
+        let tree = srp_tree();
+        let build = blueprint_game(&tree, 3, &leaf_ev_none(3)).unwrap();
+        // Топология 1:1: столько же узлов.
+        assert_eq!(build.game.nodes().len(), tree.nodes.len());
+        // Валидность — уже проверена MultiwayStaticGame::new (validate
+        // внутри); здесь структурные инварианты обходчика.
+        assert_eq!(build.uncovered_leaves, build.total_leaves);
+        assert!(build.total_leaves > 0);
+        // Root — Decision (префлоп-актор BTN).
+        match build.game.node(build.game.root()) {
+            Some(MultiwayGameNode::Decision { player, .. }) => assert_eq!(*player, 0),
+            other => panic!("root is not a decision: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blueprint_game_fold_utility_matches_chipev_semantics() {
+        let tree = srp_tree();
+        let build = blueprint_game(&tree, 3, &leaf_ev_none(3)).unwrap();
+        // Находим фолд-терминал: BTN fold на префлопе (actor 0, pot 300 —
+        // блайнды 100+200; BTN committed 0).
+        for (index, node) in tree.nodes.iter().enumerate() {
+            if let Some(LeafKind::Terminal(TerminalState::Fold { winner })) = &node.leaf {
+                if *winner == 2 && node.state.pot == 300 {
+                    // BB забирает блайнды: pot 300; committed: SB 100, BB 200.
+                    match build.game.node(index) {
+                        Some(MultiwayGameNode::Terminal { utility }) => {
+                            assert_eq!(utility.len(), 3);
+                            // BB: +300 − 200 = +100; SB: −100; BTN: −0.
+                            assert!((utility[2] - 100.0).abs() < 1e-9);
+                            assert!((utility[1] + 100.0).abs() < 1e-9);
+                            assert!((utility[0] - 0.0).abs() < 1e-9);
+                            // Нулевая сумма (zero-sum по construction).
+                            assert!(utility.iter().sum::<f64>().abs() < 1e-9);
+                        }
+                        other => panic!("not terminal: {other:?}"),
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn blueprint_game_leaf_ev_overrides_zeros() {
+        let tree = srp_tree();
+        let mut ev = BlueprintLeafEv::new(3);
+        // SRP-лист: BTN +50, BB −50 (заготовка — несущественные числа,
+        // проверяется механика подстановки, не покер).
+        let leaf = tree
+            .nodes
+            .iter()
+            .find(|n| matches!(n.leaf, Some(LeafKind::RoundComplete)) && n.state.pot == 1100)
+            .map(|n| n.id)
+            .unwrap();
+        ev.set(leaf, vec![50.0, 0.0, -50.0]).unwrap();
+        let build = blueprint_game(&tree, 3, &ev).unwrap();
+        assert_eq!(build.total_leaves, 11);
+        assert_eq!(build.uncovered_leaves, 10);
+        match build.game.node(leaf) {
+            Some(MultiwayGameNode::Terminal { utility }) => {
+                assert_eq!(utility.clone(), vec![50.0, 0.0, -50.0]);
+            }
+            other => panic!("not terminal: {other:?}"),
+        }
+        // Ошибка длины вектора ловится.
+        assert!(ev.set(leaf, vec![1.0]).is_err());
+    }
+
+    #[test]
+    fn blueprint_infoset_is_deterministic_and_distinct() {
+        let a = blueprint_infoset(0, 5);
+        let b = blueprint_infoset(0, 5);
+        let c = blueprint_infoset(1, 5);
+        let d = blueprint_infoset(0, 6);
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+        assert_ne!(a, d);
+    }
+
+    // ===== T5.2 ч.3: каркасный MCCFR-раунд =====
+
+    #[test]
+    fn blueprint_round_weights_sum_to_one() {
+        let tree = srp_tree();
+        let round = blueprint_round(&tree, 3, &BlueprintLeafEv::new(3), 500, 7).unwrap();
+        assert_eq!(round.iterations, 500);
+        let total: f64 = round.leaf_weights.values().sum::<f64>();
+        assert!(total > 0.0 && total <= 1.0 + 1e-9);
+        assert!(!round.strategies.is_empty());
+        for frequencies in round.strategies.values() {
+            assert!((frequencies.iter().sum::<f64>() - 1.0).abs() < 1e-6);
+            assert!(frequencies.iter().all(|value| value.is_finite()));
+        }
+    }
+
+    #[test]
+    fn blueprint_round_responds_to_leaf_ev() {
+        // Плотный сигнал: EV на ВСЕ RoundComplete-листья (BTN +1000).
+        // Внешняя выборка посещает листы каждый раунд — regret BTN
+        // получает сигнал на каждом визите, средняя сдвигается к
+        // агрессии; вес SRP-листа (путь через BTN-рейз) растёт против
+        // нулей. Редкий лист (1.25e-6) не годится для проверки:
+        // ~0.75 визита за 200k итераций — лотерея, а не тест
+        // (урок сессии 21).
+        let tree = srp_tree();
+        let leaf = tree
+            .nodes
+            .iter()
+            .find(|n| matches!(n.leaf, Some(LeafKind::RoundComplete)) && n.state.pot == 1100)
+            .map(|n| n.id)
+            .unwrap();
+        let zero = blueprint_round(&tree, 3, &BlueprintLeafEv::new(3), 2_000, 7).unwrap();
+        let mut ev = BlueprintLeafEv::new(3);
+        for node in &tree.nodes {
+            if matches!(node.leaf, Some(LeafKind::RoundComplete)) {
+                ev.set(node.id, vec![1000.0, 0.0, -1000.0]).unwrap();
+            }
+        }
+        let fed = blueprint_round(&tree, 3, &ev, 2_000, 7).unwrap();
+        let w_zero = zero.leaf_weights.get(&leaf).copied().unwrap_or(0.0);
+        let w_fed = fed.leaf_weights.get(&leaf).copied().unwrap_or(0.0);
+        assert!(
+            w_fed > w_zero,
+            "fed weight {w_fed} should exceed zero weight {w_zero}"
+        );
+    }
+
+    #[test]
+    fn blueprint_round_zero_integration_chain() {
+        // Полный конвейер D-025(3) на smoke: carve -> job -> solve(50) ->
+        // utility_estimate.mean -> EV-таблица -> blueprint_game -> MCCFR.
+        use crate::MultiwayHoldemSpotJob;
+        let tree = srp_tree();
+        let leaf = tree
+            .nodes
+            .iter()
+            .find(|n| matches!(n.leaf, Some(LeafKind::RoundComplete)) && n.state.pot == 1100)
+            .map(|n| n.id)
+            .unwrap();
+        let spot = carve_spot(&tree, leaf).unwrap();
+
+        let ranges = vec![
+            "AA-TT, AKs-ATs".to_string(),
+            "AA-22".to_string(),
+            "AA-22, AKs-A2s".to_string(),
+        ];
+        let mut job_value = carved_spot_job_json(
+            &spot,
+            &ranges,
+            "KK",
+            "BB KK round0",
+            "2s 7d 9c",
+            "5h",
+            "3h",
+            20260927,
+        );
+        job_value["table"] = serde_json::json!({
+            "table_size": 3, "button": 0, "small_blind": 100, "big_blind": 200,
+            "ante": 0, "ante_mode": "none",
+            "stacks": [20000, 20000, 20000], "dead_money": 0
+        });
+        let json = serde_json::to_string_pretty(&job_value).unwrap();
+        let job = MultiwayHoldemSpotJob::from_json(&json).unwrap();
+        let config = job.into_config().unwrap();
+        let result = config.solve(50, 1).unwrap();
+
+        let mean = &result.strategy_report.utility_estimate.mean;
+        assert_eq!(mean.len(), 3);
+        let mut ev = BlueprintLeafEv::new(3);
+        ev.set(leaf, mean.clone()).unwrap();
+
+        let round = blueprint_round(&tree, 3, &ev, 500, 7).unwrap();
+        assert!(round.leaf_weights.contains_key(&leaf));
+        assert!(!round.strategies.is_empty());
     }
 }
