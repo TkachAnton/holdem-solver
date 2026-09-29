@@ -200,6 +200,35 @@ pub struct MultiwayHoldemSpotStreetJson {
     pub raise_multipliers: Vec<f64>,
     #[serde(default)]
     pub include_all_in: bool,
+    /// T5.1: позиционные рейз-сайзинги улицы — список { position, raise_to[] };
+    /// отсутствует/пусто — глобальный explicit_raise_to (пины не тронуты).
+    #[serde(default)]
+    pub raise_to_by_position: Vec<MultiwayHoldemSpotPositionalSizingJson>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultiwayHoldemSpotPositionalSizingJson {
+    pub position: String,
+    pub raise_to: Vec<Chips>,
+}
+
+/// T5.1: парсинг имени позиции в Position (жёстко — неизвестное имя
+/// позиции = ошибка парсинга, D-013; имена соответствуют Display
+/// домена: UTG/UTG+1/LJ/HJ/CO/BTN/SB/BB).
+fn parse_position(name: &str) -> Result<holdem_domain::table::Position, String> {
+    match name.trim().to_ascii_uppercase().as_str() {
+        "UTG" => Ok(holdem_domain::table::Position::Utg),
+        "UTG+1" | "UTG1" => Ok(holdem_domain::table::Position::Utg1),
+        "LJ" => Ok(holdem_domain::table::Position::Lj),
+        "HJ" => Ok(holdem_domain::table::Position::Hj),
+        "CO" => Ok(holdem_domain::table::Position::Co),
+        "BTN" => Ok(holdem_domain::table::Position::Button),
+        "SB" => Ok(holdem_domain::table::Position::SmallBlind),
+        "BB" => Ok(holdem_domain::table::Position::BigBlind),
+        other => Err(format!(
+            "unknown position {other:?}: expected UTG, UTG+1, LJ, HJ, CO, BTN, SB or BB"
+        )),
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -362,7 +391,7 @@ impl MultiwayHoldemSpotJob {
             .as_ref()
             .map(|spec| spec.blocking_samples)
             .unwrap_or(0);
-        let preflop_sizing = self.tree.preflop.clone().into_sizing();
+        let preflop_sizing = self.tree.preflop.clone().into_sizing()?;
         let tree = self.tree.into_tree_config(dead_cards | board_mask)?;
         validate_postflop_start(&tree, &preflop_sizing, &board_cards)?;
         let execution = self.execution;
@@ -546,10 +575,10 @@ impl MultiwayHoldemSpotTreeJson {
         let round = TreeBuildConfig {
             action_sizes: ActionSizes::default(),
             abstraction: Some(ActionAbstraction {
-                preflop: self.preflop.into_sizing(),
-                flop: self.flop.into_sizing(),
-                turn: self.turn.into_sizing(),
-                river: self.river.into_sizing(),
+                preflop: self.preflop.into_sizing()?,
+                flop: self.flop.into_sizing()?,
+                turn: self.turn.into_sizing()?,
+                river: self.river.into_sizing()?,
             }),
             max_nodes: self.max_nodes,
             max_depth: self.max_depth,
@@ -568,14 +597,26 @@ impl MultiwayHoldemSpotTreeJson {
 }
 
 impl MultiwayHoldemSpotStreetJson {
-    fn into_sizing(self) -> StreetSizing {
-        StreetSizing {
+    fn into_sizing(self) -> Result<StreetSizing, String> {
+        let mut raise_to_by_position: Vec<(holdem_domain::table::Position, Vec<Chips>)> =
+            Vec::with_capacity(self.raise_to_by_position.len());
+        for entry in &self.raise_to_by_position {
+            let position = parse_position(&entry.position)?;
+            raise_to_by_position.push((position, entry.raise_to.clone()));
+        }
+        let raise_to_by_position = if raise_to_by_position.is_empty() {
+            None
+        } else {
+            Some(raise_to_by_position)
+        };
+        Ok(StreetSizing {
             explicit_bet_to: self.explicit_bet_to,
             bet_fractions: self.bet_fractions,
             explicit_raise_to: self.explicit_raise_to,
             raise_multipliers: self.raise_multipliers,
             include_all_in: self.include_all_in,
-        }
+            raise_to_by_position,
+        })
     }
 }
 
@@ -915,6 +956,77 @@ mod tests {
                     ),
                 }
             }
+        }
+    }
+
+    #[test]
+    fn json_positional_raise_sizing_round_trips_and_rejects_unknown_position() {
+        // Позитив: карта позиций доходит до StreetSizing (BTN -> 500).
+        let mut job = sample_job();
+        job.tree.mode = MultiwayHoldemSpotTreeModeJson::Full;
+        job.tree.preflop.raise_to_by_position = vec![MultiwayHoldemSpotPositionalSizingJson {
+            position: "BTN".to_string(),
+            raise_to: vec![500],
+        }];
+        let config = job.into_config().unwrap();
+        if let MultiwayHoldemSpotTreeConfig::Full(full) = &config.tree {
+            let map = full
+                .round
+                .abstraction
+                .as_ref()
+                .unwrap()
+                .preflop
+                .raise_to_by_position
+                .as_ref()
+                .unwrap();
+            assert_eq!(map.len(), 1);
+            assert!(matches!(map[0].0, holdem_domain::table::Position::Button));
+            assert_eq!(map[0].1, vec![500]);
+        } else {
+            panic!("expected full tree config");
+        }
+
+        // Негатив: неизвестная позиция — жёсткая ошибка парсинга (D-013).
+        let mut job = sample_job();
+        job.tree.preflop.raise_to_by_position = vec![MultiwayHoldemSpotPositionalSizingJson {
+            position: "MIDDLE".to_string(),
+            raise_to: vec![500],
+        }];
+        let error = job.into_config().unwrap_err();
+        assert!(error.contains("unknown position"), "error: {error}");
+    }
+
+    #[test]
+    fn json_positional_empty_list_is_legal() {
+        // D-024(10): запись с пустым raise_to = позиция без рейз-сайзингов
+        // (fold/call остаётся); жёсткая ошибка — только отсутствие записи.
+        let mut job = sample_job();
+        job.tree.mode = MultiwayHoldemSpotTreeModeJson::Full;
+        job.tree.preflop.raise_to_by_position = vec![
+            MultiwayHoldemSpotPositionalSizingJson {
+                position: "BTN".to_string(),
+                raise_to: vec![500],
+            },
+            MultiwayHoldemSpotPositionalSizingJson {
+                position: "BB".to_string(),
+                raise_to: vec![],
+            },
+        ];
+        let config = job.into_config().unwrap();
+        if let MultiwayHoldemSpotTreeConfig::Full(full) = &config.tree {
+            let map = full
+                .round
+                .abstraction
+                .as_ref()
+                .unwrap()
+                .preflop
+                .raise_to_by_position
+                .as_ref()
+                .unwrap();
+            assert_eq!(map.len(), 2);
+            assert!(map[1].1.is_empty(), "BB: пустой список легален");
+        } else {
+            panic!("expected full");
         }
     }
 }

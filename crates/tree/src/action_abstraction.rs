@@ -12,6 +12,11 @@ pub struct StreetSizing {
     pub explicit_raise_to: Vec<Chips>,
     pub raise_multipliers: Vec<f64>,
     pub include_all_in: bool,
+    /// T5.1/D-024: позиционные рейз-сайзинги улицы (RFI/3-бет конвенции):
+    /// None — глобальный explicit_raise_to (прежнее поведение, пины не тронуты);
+    /// Some — актору с известной позицией берётся его список, позиция
+    /// без записи — ошибка конфигурации (жёстко, D-013).
+    pub raise_to_by_position: Option<Vec<(holdem_domain::table::Position, Vec<Chips>)>>,
 }
 
 impl Default for StreetSizing {
@@ -20,6 +25,7 @@ impl Default for StreetSizing {
             explicit_bet_to: Vec::new(),
             bet_fractions: Vec::new(),
             explicit_raise_to: Vec::new(),
+            raise_to_by_position: None,
             raise_multipliers: Vec::new(),
             include_all_in: false,
         }
@@ -121,13 +127,35 @@ impl ActionAbstraction {
             }
             dedup_sort(&mut result.bet_to);
         } else {
-            result.raise_to.extend(
-                sizing
-                    .explicit_raise_to
-                    .iter()
-                    .copied()
-                    .filter(|&target| target > state.current_bet && target <= maximum),
-            );
+            // T5.1: позиционная карта — жёстко на отсутствие записи для
+            // позиции актора (конфигурация ошибочна); достижимость цели в
+            // конкретном узле (current_bet/maximum/мин-инкремент) — мягкий
+            // фильтр, как исторически: глобальный список легален на улице,
+            // но не обязан быть достижимым в каждом узле.
+            let raise_source: Vec<Chips> = match &sizing.raise_to_by_position {
+                Some(map) => {
+                    let position = position_of_actor(state).ok_or_else(|| {
+                        "positional sizing requires an actor with a known position".to_string()
+                    })?;
+                    let (_, targets) = map
+                        .iter()
+                        .find(|(candidate, _)| *candidate == position)
+                        .ok_or_else(|| {
+                            format!("positional sizing has no entry for position {position:?}")
+                        })?;
+                    targets.clone()
+                }
+                None => sizing.explicit_raise_to.clone(),
+            };
+            for target in raise_source {
+                let increment = target - state.current_bet;
+                if target > state.current_bet
+                    && target <= maximum
+                    && increment >= state.min_raise_increment
+                {
+                    result.raise_to.push(target);
+                }
+            }
             for &multiplier in &sizing.raise_multipliers {
                 if !multiplier.is_finite() || multiplier <= 1.0 {
                     return Err("raise multipliers must be finite and greater than one".to_string());
@@ -142,6 +170,15 @@ impl ActionAbstraction {
 
         Ok(result)
     }
+}
+
+fn position_of_actor(state: &GameState) -> Option<holdem_domain::table::Position> {
+    let actor = state.actor?;
+    state
+        .players
+        .iter()
+        .find(|player| player.seat == actor)
+        .map(|player| player.position)
 }
 
 fn round_chips(value: f64) -> Result<Chips, String> {
@@ -231,5 +268,87 @@ mod tests {
             ..ActionAbstraction::default()
         };
         assert!(abstraction.action_sizes(&state).is_err());
+    }
+
+    fn positional_state() -> GameState {
+        use holdem_domain::setup::build_preflop_state;
+        use holdem_domain::table::{AnteMode, TableConfig};
+        let table = TableConfig {
+            table_size: 3,
+            button: 0,
+            small_blind: 1,
+            big_blind: 2,
+            ante: 0,
+            ante_mode: AnteMode::None,
+            stacks: vec![20000, 20000, 20000],
+            dead_money: 0,
+        };
+        build_preflop_state(&table).unwrap()
+    }
+
+    #[test]
+    fn positional_raise_sizing_selects_actor_entry() {
+        use holdem_domain::table::Position;
+        let state = positional_state();
+        let sizing = StreetSizing {
+            raise_to_by_position: Some(vec![
+                (Position::Button, vec![500]),
+                (Position::SmallBlind, vec![600]),
+                (Position::BigBlind, vec![440]),
+            ]),
+            ..StreetSizing::default()
+        };
+        let abstraction = ActionAbstraction {
+            preflop: sizing,
+            ..ActionAbstraction::default()
+        };
+        let sizes = abstraction.action_sizes(&state).unwrap();
+        assert_eq!(sizes.raise_to, vec![500]);
+    }
+
+    #[test]
+    fn positional_raise_sizing_missing_entry_is_error() {
+        use holdem_domain::table::Position;
+        let state = positional_state();
+        let sizing = StreetSizing {
+            raise_to_by_position: Some(vec![(Position::BigBlind, vec![440])]),
+            ..StreetSizing::default()
+        };
+        let abstraction = ActionAbstraction {
+            preflop: sizing,
+            ..ActionAbstraction::default()
+        };
+        let error = abstraction.action_sizes(&state).unwrap_err();
+        assert!(error.contains("no entry"));
+    }
+
+    #[test]
+    fn unreachable_global_raise_target_is_filtered_softly() {
+        // T5.1-семантика: глобальный список легален на улице; цели,
+        // недостижимые в конкретном узле (<= current_bet), фильтруются
+        // мягко — как исторически. Жёсткость только у позиционной карты
+        // («нет записи для позиции»).
+        let state = positional_state();
+        // BTN открывает: current_bet = 200 (BB). Цель 150 недостижима.
+        let mut state = state;
+        use holdem_domain::Action;
+        // BTN raise to 500 -> current_bet 500 (после SB/BB? нет: 3-max, BTN
+        // первый; для current_bet=500 применим raise на месте)
+        state.apply_action(Action::Raise { to: 500 }).unwrap();
+        // SB fold, BB call -> префлоп закрыт? Для теста фильтра достаточно
+        // остаться в раунде: проверим фильтр на узле с current_bet=500.
+        let sizing = StreetSizing {
+            explicit_raise_to: vec![150, 400, 1200],
+            ..StreetSizing::default()
+        };
+        let abstraction = ActionAbstraction {
+            preflop: sizing,
+            ..ActionAbstraction::default()
+        };
+        // Актор после рейза BTN: SB (seat 1). Глобальный список:
+        // 150 <= 500 (недостижим — отфильтрован), 400 <= 500 (отфильтрован),
+        // 900 > 500 и инкремент 400 >= min_raise — легален.
+        let sizes = abstraction.action_sizes(&state).unwrap();
+        assert_eq!(sizes.raise_to, vec![1200]);
     }
 }
