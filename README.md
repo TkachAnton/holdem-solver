@@ -4,19 +4,24 @@
 
 ## Текущий статус
 
-Реализован начальный foundation slice:
+Продвинутый NLHE 8-max MTT ChipEV солвер (личный учебный инструмент).
 
-- кодирование карт 0–51;
-- deck masks и проверка duplicate cards;
-- парсинг preflop range;
-- exact combo generation для пар/суited/offsuited рук;
-- weighted combo representation;
-- единый evaluator 5–7 карт;
-- exact profile equity для flop/turn/river;
-- базовая модель ChipEV game state;
-- invariant checks для pot и игроков.
+Закрытые вехи (подробности и источники истины — в docs/):
 
-Уже добавлены базовые street-aware tree/chance nodes, solver-core CFR+ и external-sampling MCCFR toy engines, Kuhn и reduced one-bet-per-round Leduc reference games, finite-deal private-card compiler для HU Hold'em, JSON checkpoints с resume, tree/action-abstraction fingerprints, range-conditioned batch runner, exact strategy/action-EV report, blocker-aware range/class aggregation, complete 13x13 range-matrix projection, versioned JSON/CSV export, multiway external-sampling MCCFR, sampled multiway batch solver и 3-8 player Hold'em compiler/payoff foundation. Первый adapter `holdem-tree -> StaticGame` сохраняет action metadata и использует fold/showdown ChipEV payoff для фиксированных hands. Поверх этого foundation добавлены versioned multiway spot JSON jobs, persistent native CLI с validate/solve/resume, machine-readable CLI envelopes и минимальный native HTTP server boundary для validate/solve/status. Frontend и ICM остаются отдельными слоями.
+- **Фазы 0–4**: дисциплина (ROADMAP/DECISIONS/AI_LOG), точный ICM + bubble factor
+  + CLI, HU пуш/фолд (FP, exploitability-гейты), абстракция карт (флоп 1755 /
+  тёрн 16 432 / ривер 134 459 классов, exact-эквити) с интеграцией за флагом
+  с отчётом потери (D-019); постфлоп-стартующие споты за полем board (D-020);
+  честная эксплуатируемость вилкой sampled-BR с SE в bb/% банка (D-021);
+  дрилл v0 в CLI — 10 рук, потеря EV paired conditioned-MC, REPL-команда
+  drill (D-022). HU-гварды 2..=8; enumerate уважает dead_cards.
+- **Q-1 решён (D-023)**: клиент-серверный UI (HTTP на std) — язык hero-экрана
+  утверждён; сборка UI-оболочки — план кусков в D-023(5).
+- **Активная фаза: 5 — префлоп-блюпринт 8-max (T5.1 в работе).**
+
+Источники истины: docs/ROADMAP.md (план), docs/DECISIONS.md (решения
+D-001…D-024), docs/AI_LOG.md (история сессий + HANDOCK-раздел «Текущее
+состояние» наверху). Этот README — витрина; детали не дублирует.
 
 ## Структура
 
